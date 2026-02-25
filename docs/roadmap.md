@@ -93,6 +93,18 @@
 5. **Belge Oluşturma Paneli**: Eksik alanlar doğru listeleniyor ✅
 6. **İlerleme Takibi**: Sidebar progress bar'ı doğru çalışıyor (22/39, %50) ✅
 
+
+---
+
+## ✅ Görev 6: GitHub + Streamlit Cloud Dağıtımı (Tamamlandı)
+
+### Yapılanlar:
+1. **pywin32 bağımlılığı kaldırıldı**: PDF dönüşümü LibreOffice headless ile platformdan bağımsız yapıldı
+2. **Cloud dosyaları oluşturuldu**: `requirements.txt`, `packages.txt`, `.streamlit/config.toml`
+3. **GitHub reposu**: https://github.com/ertugguney/ihale-dosyasi-doldurma
+4. **Streamlit Cloud dağıtımı**: Başarıyla canlıya alındı
+5. **Canlı URL**: https://ihale-dosyasi-doldurma-bcrhaxb5oh5kglecegvmns.streamlit.app/
+
 ---
 
 ## 🔮 Sonraki Adımlar (Planlanan):
@@ -101,3 +113,4 @@
 - [ ] Şartname ekleme modülü
 - [ ] Kullanıcı oturum yönetimi
 - [ ] Birden fazla ihale dosyası şablonu desteği
+

@@ -67,12 +67,18 @@ Belgede sarı vurgulu olup, yardımcı bilgi/talimat niteliğinde olan alanlar
 (örn: "Bu beyanın metni değiştirilemez") form alanı olarak sunulmaz, 
 belgenin orijinal halinde kalır.
 
-## 🖥️ Nasıl Başlatılır?
+## 🖥️ Nasıl Erişilir?
 
-### Terminal Komutu (Tek Komut):
+### 🌐 Canlı Uygulama (Herkes Erişebilir):
+**https://ihale-dosyasi-doldurma-bcrhaxb5oh5kglecegvmns.streamlit.app/**
+
+### 💻 Lokal Çalıştırma (Geliştirici):
 ```bash
 cd c:\Users\eguney\Desktop\ihale && streamlit run app.py
 ```
+
+### 📦 GitHub Reposu:
+https://github.com/ertugguney/ihale-dosyasi-doldurma
 
 ### Gereksinimler:
 ```bash
