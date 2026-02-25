@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Çıktılar (her kullanıcı kendi oluşturur)
+output/
+data/draft.json
+
+# Analiz scriptleri (geliştirme amaçlı)
+analyze_doc.py
+analyze_detailed.py
+yellow_fields_analysis.json
+table_fields_analysis.json
+
+# Windows kısayolları
+*.lnk
+*.bat
+
+# Geçici Word dosyaları
+~$*
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Agent dosyaları
+AG
+AG_*.md
+.agent/
+.gemini/
