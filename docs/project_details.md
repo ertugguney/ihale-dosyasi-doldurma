@@ -62,19 +62,22 @@ sunulur:
 - **Sigorta**: Aranacaktır / Aranmayacaktır
 - **İstekli Kapsamı**: Yerli-yabancı / Sadece yerli
 
-### 6. Talimat/Açıklama Alanları (Form Dışı)
+### 6. Talimat/Açıklama Alanları (Çıktıdan Siliniyor)
 Belgede sarı vurgulu olup, yardımcı bilgi/talimat niteliğinde olan alanlar 
-(örn: "Bu beyanın metni değiştirilemez") form alanı olarak sunulmaz, 
-belgenin orijinal halinde kalır.
+(örn: "Bu beyanın metni değiştirilemez", "(Yalnızca pazarlık usülü ihaleler için kullanılacaktır)")
+form alanı olarak sunulmaz ve **çıktı Word/PDF dosyalarından tamamen silinir**.
+Bu sayede nihai belge yalnızca doldurulmuş gerçek verileri içerir.
 
 ## 🖥️ Nasıl Erişilir?
 
 ### 🌐 Canlı Uygulama (Herkes Erişebilir):
 **https://ihale-dosyasi-doldurma-bcrhaxb5oh5kglecegvmns.streamlit.app/**
 
-### 💻 Lokal Çalıştırma (Geliştirici):
-```bash
-cd c:\Users\eguney\Desktop\ihale && streamlit run app.py
+### 💻 Lokal Çalıştırma (Geliştirici) ve Terminal Komutları:
+Uygulamayı başlatmak ve tüm süreci tek bir terminal komutuyla yürütmek için aşağıdaki kod bloğunu kullanabilirsiniz:
+
+```powershell
+cd c:\Users\eguney\Desktop\ihale ; $start_time = Get-Date ; streamlit run app.py ; $end_time = Get-Date ; Write-Host "Toplam Yürütme Süresi: $(($end_time - $start_time).TotalSeconds) saniye" 
 ```
 
 ### 📦 GitHub Reposu:
@@ -103,8 +106,14 @@ Ardışık sarı run'lar birleştirilerek tek bir metin olarak işlenir:
 
 ### Dosya Çıktı Formatları
 - **Word (.docx)**: python-docx ile doğrudan oluşturulur
-- **PDF**: pywin32 ile Microsoft Word üzerinden dönüştürülür
-- **CSV**: Form verileri tarihli CSV dosyasına kaydedilir
+- **PDF**: pywin32 veya LibreOffice ile Microsoft Word üzerinden dönüştürülür
+- **CSV**: Form verileri (tarihli) CSV dosyasına kaydedilir ve güncel logları tutar.
+
+### Uygulanan Dil Kuralları ve Biçim:
+Çıktı Word dosyasına otomatik bold yazım uygulanmakta, ek olarak etraftaki `<` ve `>` işaretleri temizlenmektedir. İl/ilçe için yer (bulunma) ekleri ve saat verileri için yönelme ekleri Türkçe dil bilgisi kurallarına göre ('de/'da, 'e/'a vb.) otomatik hesaplanarak şablona yansıtılmaktadır. Ek olarak şablon metninde yer alan noktalama eksiklikleri (örneğin "..." yerine ":") python-docx ile dinamik düzeltilmektedir.
+
+### Akıllı Form Özellikleri:
+Streamlit arayüzünde bağlamsal koşullar bulunmaktadır. Örneğin "Kesin Teminat" veya "Ön Ödeme" dropdown menülerinde `İSTENMEMEKTEDİR` / `Yapılmayacaktır` seçildiğinde oransal değeri soran form alanları akıllı bir şekilde ekrandan kaybolmaktadır (React tarzı dinamik rendering). Aynı şekilde şablon içerisinde bu koşullara bağlı olan uzun ve karmaşık talimat cümleleri (Örn: oran hesabı yapan metinler) docx işleme sırasında dinamik olarak şablondan tamamen temizlenir ya da düzgün bir cümleye dönüştürülür. Mükerrer "Projesi Projesi" gibi metin yanlışlıklarının önüne geçecek regex temizleyiciler kullanılmıştır.
 
 ## 📊 Eşik Değerleri ve Kısıtlamalar
 

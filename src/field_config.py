@@ -144,8 +144,8 @@ UNIQUE_FIELDS = {
     "ihale_konusu": {
         "label": "İhale Konusu (Alım Sözleşmesinin Tanımı)",
         "type": "textarea",
-        "placeholder": "Örn: Ofis mobilyası ve bilgisayar ekipmanları temini",
-        "help": "İhaleye konu olan alım sözleşmesinin kısa tanımı.",
+        "placeholder": "Örn: Ofis mobilyası ve bilgisayar ekipmanları temini\n(Birden fazla kalem varsa her birini klavyede 'Enter' tuşuna basarak yeni bir satıra yazınız.)",
+        "help": "İhaleye konu olan alım sözleşmesinin kısa tanımı. Birden fazla alım kalemi (i, ii, iii vb.) varsa lütfen her birini ayrı bir satıra yazınız.",
         "required": True,
         "category": "İhale Bilgileri",
         "order": 21,
@@ -408,7 +408,7 @@ UNIQUE_FIELDS = {
         "max_value": 20,
     },
     "dava_gecmisi_yili": {
-        "label": "Dava/Tahkim Geçmişi Yıl Sayısı",
+        "label": "Kaç yıl geriye doğru Adli Sicil Kaydı İstenecek",
         "type": "number",
         "placeholder": "Örn: 5",
         "help": "Son kaç yıl içerisinde yürütülen sözleşmelerden kaynaklanan dava/tahkim geçmişinin "
@@ -444,12 +444,10 @@ FIELD_CATEGORIES = [
 YELLOW_TO_UNIQUE_MAP = {
     # Kurum bilgileri
     "Mali Destek Yararlanıcısın İsmi": "kurum_adi",
-    "Sözleşme Makamı (Mali Destek Yararlanıcısı) (Mali Destek Yararlanıcısının anteti)": "kurum_adi",
     "Sözleşme Makamının (Mali Destek Yararlanıcısının) resmi adı ve adresi": "kurum_adi",
     "Sözleşme Makamı (Yararlanıcı)nın ismi ve adresi": "kurum_adi",
     "Sözleşme Makamının anteti": "kurum_adi",
     "…………………………………………………………………………": "kurum_adi",
-    "___________________": "kurum_adi",
     "________________": "kurum_adi",
     
     "yararlanıcı adresi": "kurum_adresi",
@@ -475,7 +473,6 @@ YELLOW_TO_UNIQUE_MAP = {
     "proje adı": "proje_adi",
     "Proje adı": "proje_adi",
     "............................................................................................................": "proje_adi",
-    "… … … … … … … … …": "proje_adi",
     
     "Destek Programının İsmi": "destek_programi_adi",
     
@@ -539,20 +536,21 @@ YELLOW_TO_UNIQUE_MAP = {
     
     "sayı (uygulama süresini giriniz": "uygulama_suresi_ay",
     
-    "Lot Numarası": "lot_numarasi",
     "Lot No, ihale lotlara bölünmüş ise": "lot_numarasi",
     
     "......................................": "diger_bilgiler",
     
     "rakam": "benzer_is_yili",
     "<rakam girin>": "dava_gecmisi_yili",
+    
+    "İhale konusu işin niteliğine göre istenen bilgi ve/veya belgelerden": "yeterlik_degerlendirme",
 }
 
 # Talimat / açıklama niteliğindeki sarı alanlar (form alanı değil, bilgilendirme amaçlı)
 INSTRUCTION_FIELDS = [
+    "Lot Numarası",
     "Aşağıda yer alan maddeler içerisindeki boş yerler",
     "İhalenize aşağıdaki ifadelerden hangisi uygun ise onu seçiniz",
-    "İhale konusu işin niteliğine göre istenen bilgi ve/veya belgelerden",
     "Sözleşme Makamı ihale yöntemini belirlediğinde",
     "Birim fiyat esasında ihale yapılmakta ise",
     "Götürü bedel ihalelerde",

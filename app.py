@@ -474,10 +474,27 @@ def render_form():
             """, unsafe_allow_html=True)
 
             fields = categorized.get(cat, [])
+            
+            # Görünen alanları filtrele (Koşullu alanlar için)
+            visible_fields = []
+            for field_id, field_info in fields:
+                # Kesin Teminat Oranı Gizleme
+                if field_id == "kesin_teminat_orani":
+                    if st.session_state.form_data.get("kesin_teminat") == "İSTENMEMEKTEDİR":
+                        st.session_state.form_data[field_id] = ""
+                        continue
+                        
+                # Ön Ödeme Oranı Gizleme
+                if field_id == "on_odeme_orani":
+                    if st.session_state.form_data.get("on_odeme") == "Yapılmayacaktır":
+                        st.session_state.form_data[field_id] = ""
+                        continue
+                        
+                visible_fields.append((field_id, field_info))
 
             # İki sütunlu düzen
             col1, col2 = st.columns(2)
-            for i, (field_id, field_info) in enumerate(fields):
+            for i, (field_id, field_info) in enumerate(visible_fields):
                 with col1 if i % 2 == 0 else col2:
                     render_form_field(field_id, field_info)
 
