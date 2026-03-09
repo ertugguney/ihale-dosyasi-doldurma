@@ -33,7 +33,7 @@ Thumbs.db
 .DS_Store
 
 # Agent dosyaları
-AG
-AG_*.md
+# AG
+# AG_*.md
 .agent/
 .gemini/
