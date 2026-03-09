@@ -424,6 +424,41 @@ def render_form_field(field_id, field_info):
             key=f"field_{field_id}",
         )
 
+    elif field_type == "list":
+        # Dinamik Çoklu Satır Girişi
+        st.write(f"**{label}**")
+        if help_text:
+            st.caption(help_text)
+            
+        # Mevcut değerleri listeye çevir (CSV'den string gelmiş olabilir)
+        if isinstance(current_value, str):
+            items = [i.strip() for i in current_value.splitlines() if i.strip()]
+        elif isinstance(current_value, list):
+            items = current_value
+        else:
+            items = []
+            
+        # En az 1 boş satır olsun
+        if not items:
+            items = [""]
+            
+        new_items = []
+        for i, item in enumerate(items):
+            input_val = st.text_input(
+                f"Kalem {i+1}",
+                value=item,
+                placeholder=placeholder,
+                key=f"field_{field_id}_{i}"
+            )
+            new_items.append(input_val)
+            
+        # Yeni satır ekleme butonu
+        if st.button("➕ Yeni Kalem Ekle", key=f"btn_add_{field_id}"):
+            new_items.append("")
+            st.rerun()
+            
+        value = [i.strip() for i in new_items if i.strip()]
+
     elif field_type in ("phone", "email"):
         value = st.text_input(
             label,

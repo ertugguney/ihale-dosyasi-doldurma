@@ -143,9 +143,9 @@ UNIQUE_FIELDS = {
     },
     "ihale_konusu": {
         "label": "İhale Konusu (Alım Sözleşmesinin Tanımı)",
-        "type": "textarea",
-        "placeholder": "Örn: Ofis mobilyası ve bilgisayar ekipmanları temini\n(Birden fazla kalem varsa her birini klavyede 'Enter' tuşuna basarak yeni bir satıra yazınız.)",
-        "help": "İhaleye konu olan alım sözleşmesinin kısa tanımı. Birden fazla alım kalemi (i, ii, iii vb.) varsa lütfen her birini ayrı bir satıra yazınız.",
+        "type": "list",
+        "placeholder": "Örn: Ofis mobilyası",
+        "help": "İhaleye konu olan alım kalemlerini (mal/hizmet/yapım) satır satır belirtiniz. Davet mektubunda (i), (ii), (iii) olarak listelenecektir.",
         "required": True,
         "category": "İhale Bilgileri",
         "order": 21,
@@ -480,6 +480,8 @@ YELLOW_TO_UNIQUE_MAP = {
     
     "sözleşme no/ihale no": "ihale_referans_no",
     "sözleşme no/ihale no>": "ihale_referans_no",
+    "SÖZLEŞME NO/İHALE NO": "ihale_referans_no",
+    "SÖZLEŞME NO/İHALE NO>": "ihale_referans_no",
     
     # İhale bilgileri
     "Mal Alımı/Hizmet Alımı/Yapım İşi (uygun olan(lar) seçilecek)": "ihale_turu",
@@ -536,7 +538,6 @@ YELLOW_TO_UNIQUE_MAP = {
     
     "sayı (uygulama süresini giriniz": "uygulama_suresi_ay",
     
-    "Lot No, ihale lotlara bölünmüş ise": "lot_numarasi",
     
     "......................................": "diger_bilgiler",
     
@@ -596,6 +597,8 @@ INSTRUCTION_FIELDS = [
     "Vergi dairesi ve numarası",
     "Kesin teminat tutarı sözleşme bedelinin",
     "uygun olan seçeneği seçiniz",
+    "Sayın: ________________",
+    "Sözleşme Makamı (Yararlanıcı)nın ismi ve adresi",
 ]
 
 

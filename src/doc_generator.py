@@ -158,9 +158,9 @@ def _format_field_value(field_id, value):
     elif field_type == "number":
         formatted = str(value)
         
-    # Özel kural: Destek programı adı sonundaki "Programı" kelimesini sil.
+    # Özel kural: Destek programı adı sonundaki "Programı" (veya Programi, PROGRAM vb.) kelimesini sil.
     if field_id == "destek_programi_adi":
-        formatted = re.sub(r'(?i)\s+programı$', '', formatted)
+        formatted = re.sub(r'\s+[pP][rR][oO][gG][rR][aA][mM][ıiIİ]?\s*$', '', formatted)
         
     return formatted
 
@@ -194,36 +194,201 @@ def generate_filled_document(template_path, form_data, output_dir="output"):
             context["in_davet_mektubu"] = True
             
         # Değerlendirme paragrafı a)/b) kontrolü
-        if context["in_davet_mektubu"]:
+        if context.get("in_davet_mektubu"):
             text_norm = para.text.strip().lower()
-            if text_norm.startswith("a)") and "mal alımı ve yapım" in text_norm:
-                turu = form_data.get("ihale_turu")
+            # Başlıktaki talimat metnini temizle
+            if "değerlendirme:" in text_norm and "hangisi uygun ise onu seçiniz" in text_norm:
+                para.text = "DEĞERLENDİRME: "
+            
+            # Seçeneğe göre filtreleme
+            turu = form_data.get("ihale_turu")
+            if text_norm.startswith("a)") and "mal alımı" in text_norm:
                 if turu == "Hizmet Alımı":
                     paragraphs_to_remove.append(para)
+                else:
+                    # a) yazısını kaldır, sadece metni bırak (isteğe bağlı ama "cümle bırakılacaktır" dediği için temizleyelim)
+                    para.text = para.text.replace("a)", "").strip()
             elif text_norm.startswith("b)") and "hizmet alımlarında" in text_norm:
-                turu = form_data.get("ihale_turu")
                 if turu in ["Mal Alımı", "Yapım İşi"]:
                     paragraphs_to_remove.append(para)
+                else:
+                    # b) yazısını kaldır, sadece metni bırak
+                    para.text = para.text.replace("b)", "").strip()
                     
         # Madde 14: İSTEKLİLERE TALİMATLAR "Aşağıda yer alan maddeler..." silimi
         if "Aşağıda yer alan maddeler içerisindeki boş yerler" in para.text and "Diğer metinleri hiçbir şekilde değiştirmeyiniz" in para.text:
             paragraphs_to_remove.append(para)
+
+        # Madde 8: İhalenin yabancı isteklilere açıklığı
+        if "İhalenin yabancı isteklilere açıklığı" in para.text or "İhaleye yabancı isteklilere açıklığı" in para.text:
+            # Bir sonraki paragrafları kontrol et (Çünkü başlık ayrı paragraf olabilir)
+            context["in_madde_8"] = True
+            continue
             
-        # Madde 17: İhale Usulü Kontrolü a) ve b) maddeleri
-        if "İhaleye davet mektubu" in para.text and "Sadece Pazarlık Usulü" in para.text:
-            if form_data.get("ihale_usulu") == "Açık İhale Usulü":
-                paragraphs_to_remove.append(para)
+        if context.get("in_madde_8") and ("yerli yabancı tüm isteklilere açıktır" in para.text or "sadece yerli isteklilere açıktır" in para.text):
+            val = form_data.get("istekli_kapsamı")
+            if val:
+                para.text = str(val)
+                # Koyu yazım uygulaması yapalım genel kurala uymak için
+                for r in para.runs:
+                    r.font.bold = True
+                    r.font.italic = False
+            context["in_madde_8"] = False # İşlem tamam
+            continue
+
+        # Madde 18: Teklif ve sözleşme türü
+        if "Teklif ve sözleşme türü" in para.text and "esaslı" in para.text:
+            val = form_data.get("teklif_esasi")
+            if val:
+                # Talimatı temizle
+                instruct = "(her lot için uygun olan yöntem seçilecek ve belirtilecektir)"
+                for r in para.runs:
+                    if instruct in r.text:
+                        r.text = r.text.replace(instruct, "")
                 
-        # Madde 24: Ön Ödeme Paragrafı Yeniden Yazımı
+                # Esas metni ve "esaslı" ekini ayarla
+                target = "götürü bedel / birim fiyat esaslı"
+                if target in para.text:
+                    for r in para.runs:
+                        if target in r.text:
+                            r.text = r.text.replace(target, f"{val} esaslı")
+                            r.font.bold = True
+                else:
+                     # "götürü bedel / birim fiyat" ifadesini bul ve "esaslı" ekini koru/ekle
+                     for r in para.runs:
+                         if "götürü bedel / birim fiyat" in r.text:
+                             r.text = r.text.replace("götürü bedel / birim fiyat", val)
+                             r.font.bold = True
+                             if "esaslı" not in r.text and "esaslı" not in para.text:
+                                 r.text += " esaslı"
+            continue
+            
+            
+        # Madde 22: Teslim Yeri ve "Adresine" Kelimesi Eklenmesi
+        if "Taahhütlü posta / kargo servisi" in para.text or "Ya da Sözleşme Makamına doğrudan elden" in para.text:
+            teslim_yeri = form_data.get("teslim_yeri", "")
+            if teslim_yeri:
+                target_1 = "Taahhütlü posta / kargo servisi) ile"
+                target_2 = "Ya da Sözleşme Makamına doğrudan elden"
+                
+                if target_1 in para.text:
+                    # Para text'ini temizleyip yeni yapıyı kuralım
+                    old_text = para.text
+                    para.text = ""
+                    # "Taahhütlü posta / kargo servisi) ile" kısmına kadar olan yeri koru (eğer bir madde numarası varsa vb)
+                    prefix = old_text.split(target_1)[0]
+                    para.add_run(prefix + target_1 + " ")
+                    r_val = para.add_run(f"{teslim_yeri}")
+                    r_val.bold = True
+                    para.add_run(" Adresine")
+                    # Geri kalan metni de ekle (eğer varsa)
+                    suffix = old_text.split(target_1)[-1]
+                    if suffix and suffix != old_text:
+                        para.add_run(suffix)
+                    continue
+
+                if target_2 in para.text:
+                    old_text = para.text
+                    para.text = ""
+                    prefix = old_text.split(target_2)[0]
+                    para.add_run(prefix + target_2 + " ")
+                    r_val = para.add_run(f"{teslim_yeri}")
+                    r_val.bold = True
+                    para.add_run(" Adresine")
+                    suffix = old_text.split(target_2)[-1]
+                    if suffix and suffix != old_text:
+                        para.add_run(suffix)
+                    continue
+
+        # Madde 17: İhale Usulü Kontrolü a) ve b) maddeleri
+        if "İhaleye davet mektubu" in para.text:
+            usul = form_data.get("ihale_usulu")
+            if usul == "Açık İhale Usulü":
+                paragraphs_to_remove.append(para)
+            else: # Pazarlık Usulü
+                # Talimat metnini temizle
+                for old_txt in ["(Sadece Pazarlık Usulü İhalelerde kullanılacaktır.)", "Sadece Pazarlık Usulü İhalelerde kullanılacaktır."]:
+                    if old_txt in para.text:
+                        for r in para.runs:
+                            r.text = r.text.replace(old_txt, "").strip()
+            continue
+
+        if "Teklif Dosyası" in para.text and "Sözleşme Taslağı" in para.text:
+            if form_data.get("ihale_usulu") == "Açık İhale Usulü":
+                # b) maddesini a) maddesine çevir
+                if "b)" in para.text:
+                    for r in para.runs:
+                        r.text = r.text.replace("b)", "a)")
+                elif para.text.strip().startswith("b"):
+                    # Bazen tırnak/format farklılığı olabilir
+                    for r in para.runs:
+                        if r.text.strip().startswith("b"):
+                            r.text = r.text.replace("b", "a", 1)
+            continue
+
+        # Madde 17 f) bendi: Geçici Teminat Seçimi
+        if "f) İstenmesi halinde Md. 26" in para.text and "geçici teminat" in para.text:
+            val = form_data.get("gecici_teminat")
+            if val:
+                para.text = ""
+                para.add_run("f)\tİstenmesi halinde Md. 26’daki koşullara uygun sunulmuş geçici teminat ")
+                r_val = para.add_run(f"{val}.")
+                r_val.bold = True
+                r_val.italic = False
+                continue
+
+        # Madde 17 h) bendi: Kesin Teminat Seçimi
+        if "h) İstenmesi halinde Genel Koşullar md. 29" in para.text and "kesin teminat" in para.text:
+            val = form_data.get("kesin_teminat")
+            if val:
+                para.text = ""
+                para.add_run("h)\tİstenmesi halinde Genel Koşullar md. 29’da ve Taslak Sözleşme Özel Koşullar md. 8.1’de şartları tanımlanmış kesin teminat ")
+                r_val = para.add_run(f"{val}.")
+                r_val.bold = True
+                r_val.italic = False
+                continue
+
+        # Madde 25: Sözleşme ve Özel Koşullar - Kesin Teminat Bölümü (Task 25)
+        if "Yüklenici tarafından sözleşme imzalama aşamasında kesin teminat" in para.text:
+            val = form_data.get("kesin_teminat")
+            if val:
+                # "Kesin teminat ve Sigorta" başlığı aynı paragrafta olabilir, koruyalım
+                prefix = ""
+                if "Kesin teminat ve Sigorta" in para.text:
+                    prefix = "Kesin teminat ve Sigorta "
+                
+                para.text = ""
+                para.add_run(f"{prefix}Bu sözleşme kapsamında işin ihale edildiği Yüklenici tarafından sözleşme imzalama aşamasında kesin teminat ")
+                r_val = para.add_run(f"{val}")
+                r_val.bold = True
+                r_val.italic = False
+                para.add_run(".")
+                continue
+                
+        # Madde 24: Ön Ödeme Paragrafı Yeniden Yazımı (Task 24)
         if "Sözleşme kapsamında ön ödeme" in para.text:
             val = form_data.get("on_odeme")
             if val == "Yapılmayacaktır":
-                para.text = "Sözleşme kapsamında ön ödeme yapılmayacaktır."
+                para.text = ""
+                para.add_run("Sözleşme kapsamında ön ödeme ")
+                r_val = para.add_run("yapılmayacaktır")
+                r_val.bold = True
+                r_val.italic = False
+                para.add_run(".")
             elif val == "Yapılacaktır":
                 oran = form_data.get("on_odeme_orani", "")
-                para.text = f"Sözleşme kapsamında ön ödeme yapılacaktır. Ön ödeme miktarı sözleşme bedelinin % {oran}’sı olan ……………….. TL’dir. Ön ödeme, sözleşme imza tarihinden sonra 15 gün içerisinde belirlenen ön ödeme tutarı kadar avans teminat mektubunun sunulmasını takiben yapılacaktır."
+                para.text = ""
+                para.add_run("Sözleşme kapsamında ön ödeme ")
+                r_val = para.add_run("yapılacaktır")
+                r_val.bold = True
+                r_val.italic = False
+                para.add_run(". Ön ödeme miktarı sözleşme bedelinin % ")
+                r_oran = para.add_run(f"{oran}")
+                r_oran.bold = True
+                r_oran.italic = False
+                para.add_run("’sı olan ……………….. TL’dir. Ön ödeme, sözleşme imza tarihinden sonra 15 gün içerisinde belirlenen ön ödeme tutarı kadar avans teminat mektubunun sunulmasını takiben yapılacaktır.")
             continue
-            
+                        
         # Madde 25: Kesin Teminat Oranı İkinci Cümle
         if "Kesin teminat tutarı sözleşme bedelinin" in para.text and "olmalıdır" in para.text:
             val = form_data.get("kesin_teminat")
@@ -232,9 +397,38 @@ def generate_filled_document(template_path, form_data, output_dir="output"):
                 continue
             elif val == "İSTENMEKTEDİR":
                 oran = form_data.get("kesin_teminat_orani", "")
-                para.text = f"Kesin teminat tutarı sözleşme bedelinin % {oran}’sı kadar olmalıdır."
+                para.text = ""
+                para.add_run("Kesin teminat tutarı sözleşme bedelinin % ")
+                r_oran = para.add_run(f"{oran}")
+                r_oran.bold = True
+                r_oran.italic = False
+                para.add_run("’sı kadar olmalıdır.")
                 continue
-        
+
+        # Madde 34, 36, 37: İdari Uygunluk / Sözleşme Adı / Teknik Tablo birleşik alan (< Proje adı >Projesi için...)
+        p_text_lower = para.text.lower()
+        if "proje ad" in p_text_lower and "projesi i" in p_text_lower and ("ad" in p_text_lower or "sözleşme" in p_text_lower):
+            p_adi = str(form_data.get("proje_adi", ""))
+            i_turu = str(form_data.get("ihale_turu", ""))
+            p_adi_clean = re.sub(r'(?i)\s+projesi$', '', p_adi)
+            
+            # Label ve sekmeleri koru
+            if "Sözleşme adı:" in para.text:
+                label = "Sözleşme adı: "
+            elif "Sözleşme başlı" in para.text:
+                # Şablonda 'Sözleşme başlı	:' şeklinde (tab ile) geçiyor
+                label = "Sözleşme başlı\t: "
+            else:
+                # 'Adı:' kısmında template'te \t\t var
+                label = "Adı:\t\t"
+            
+            para.text = ""
+            para.add_run(label)
+            r_val = para.add_run(f"{p_adi_clean} Projesi için {i_turu}")
+            r_val.bold = True
+            r_val.italic = False
+            continue
+            
         _process_paragraph_runs(para, form_data, stats, context)
 
     # Remove the explicitly deleted paragraphs correctly
@@ -298,8 +492,11 @@ def _process_paragraph_runs(para, form_data, stats, context):
     # Önce "(i)", "(ii)", "(iii)" durumunu kontrol edelim (Davet mektubu mal listesi)
     if context.get("in_davet_mektubu") and any(m in para.text for m in ["(i)", "(ii)", "(iii)"]):
         # Eğer paragrafta sadece (i) ____________________ vb varsa
-        ihale_konusu_text = form_data.get("ihale_konusu", "")
-        lines = [line.strip() for line in ihale_konusu_text.splitlines() if line.strip()]
+        ihale_konusu_val = form_data.get("ihale_konusu", "")
+        if isinstance(ihale_konusu_val, list):
+            lines = ihale_konusu_val
+        else:
+            lines = [line.strip() for line in str(ihale_konusu_val).splitlines() if line.strip()]
         
         for idx, marker in enumerate(["(i)", "(ii)", "(iii)"]):
             if marker in para.text:
@@ -309,6 +506,7 @@ def _process_paragraph_runs(para, form_data, stats, context):
                         r.text = r.text.replace("____________________", lines[idx])
                         r.text = r.text.replace("_________________", lines[idx])
                         r.font.bold = True
+                        r.font.italic = False
                 else:
                     # Clear it completely if no item
                     for r in runs:
@@ -330,22 +528,13 @@ def _process_paragraph_runs(para, form_data, stats, context):
         "<Örnek: TR21-11-İKT-1-XX>", "Örnek: TR21-11-İKT-1-XX",
         "<Örnek: TR21-23-İKT-XX/01>", "Örnek: TR21-23-İKT-XX/01",
         "<ÖRNEK: TR21-23-İKT-XX/01>", "ÖRNEK: TR21-23-İKT-XX/01",
+        "< ÖRNEK: TR21-23-İKT-XX/01 >", "<ÖRNEK: TR21-23-İKT-XX/01 >",
         "<uygun olan seçeneği seçiniz >", "<uygun olan seçeneği seçiniz>",
         "uygun olan seçeneği seçiniz",
-        "(Uygun olanı seçiniz)>", "(Uygun olanı seçiniz)", "Uygun olanı seçiniz",
-        "(Sadece Pazarlık Usulü İhalelerde kullanılacaktır.)", "Sadece Pazarlık Usulü İhalelerde kullanılacaktır."
+        "(Uygun olanı seçiniz)>", "(Uygun olanı seçiniz)", "Uygun olanı seçiniz"
     ]:
         if old_txt in para.text:
-            for r in runs:
-                r.text = r.text.replace(old_txt, "")
-                
-    # Madde 17: Açık ihale ise "b) Teklif Dosyası" -> "a) Teklif Dosyası"
-    if form_data.get("ihale_usulu") == "Açık İhale Usulü":
-        if "Teklif Dosyası" in para.text and ("b)" in para.text or "b" in para.text):
-            for r in runs:
-                r.text = r.text.replace("b) Teklif Dosyası", "a) Teklif Dosyası")
-                r.text = r.text.replace("b)\tTeklif Dosyası", "a)\tTeklif Dosyası")
-                r.text = r.text.replace("b) ", "a) ")
+            _replace_text_across_runs(para, old_txt, "")
 
     i = 0
     while i < len(runs):
@@ -375,18 +564,30 @@ def _process_paragraph_runs(para, form_data, stats, context):
             field_id = _match_yellow_to_field(combined_text)
 
             # Özel context geçersiz kılmaları:
-            if context.get("in_davet_mektubu") and field_id == "ihale_tarihi" and combined_text.strip() == "…./…./20…":
-                field_id = "davet_tarihi"
+            if context.get("in_davet_mektubu") and field_id == "ihale_tarihi":
+                # Davet mektubundaki tarih alanı genellikle …./…./20… formatındadır
+                if re.search(r'\d{4}|…', combined_text):
+                    field_id = "davet_tarihi"
 
             if field_id is not None:
-                value = form_data.get(field_id, "")
+                # Madde 34: Birleşik alan kontrolü (< Proje adı >Projesi için <Mal Alımı...>)
+                if "Proje adı" in combined_text and "Projesi için" in combined_text:
+                    p_adi = str(form_data.get("proje_adi", ""))
+                    i_turu = str(form_data.get("ihale_turu", ""))
+                    p_adi_clean = re.sub(r'(?i)\s+projesi$', '', p_adi)
+                    value = f"{p_adi_clean} Projesi için {i_turu}"
+                else:
+                    value = form_data.get(field_id, "")
                 
                 # Özel Biçimlendirmeler:
                 
                 # İhale Konusu başka bir yerdeyse (tek satırda) virgülle birleştir
-                if field_id == "ihale_konusu" and "\n" in str(value):
-                    lines = [line.strip() for line in str(value).splitlines() if line.strip()]
-                    value = ", ".join(lines)
+                if field_id == "ihale_konusu":
+                    if isinstance(value, list):
+                        value = ", ".join(value)
+                    elif "\n" in str(value):
+                        lines = [line.strip() for line in str(value).splitlines() if line.strip()]
+                        value = ", ".join(lines)
                     
                 # Yeterlik Değerlendirme (Davet mektubu teknik teklif paragrafında)
                 if field_id == "yeterlik_degerlendirme":
@@ -397,10 +598,12 @@ def _process_paragraph_runs(para, form_data, stats, context):
                         value = str(value).rstrip(".") + " yeterlik değerlendirmesinde kullanılacaktır."
                 
                 # Saat ise "Teklif teslimi..." gibi paragrafta isek tarih ile saati birleştirebiliriz
-                if field_id == "ihale_tarihi" and "son tarih ve saati" in para.text:
-                    ihale_saati = _format_field_value("ihale_saati", form_data.get("ihale_saati", ""))
-                    if ihale_saati:
-                        value = str(value) + " " + ihale_saati
+                if field_id == "ihale_tarihi":
+                    text_lower = para.text.lower()
+                    if "tarih" in text_lower and "saat" in text_lower:
+                        ihale_saati = _format_field_value("ihale_saati", form_data.get("ihale_saati", ""))
+                        if ihale_saati and ihale_saati not in str(value):
+                            value = str(value) + " " + ihale_saati
                         
                 # Madde 21: Teklif Esası -> "esaslı" ekle
                 if field_id == "teklif_esasi":
@@ -411,6 +614,25 @@ def _process_paragraph_runs(para, form_data, stats, context):
                     if "Taahhütlü posta" in para.text or "doğrudan elden" in para.text:
                         value = str(value) + " Adresine"
                         
+                # Madde 27, 33: "İsteklinin adı" dots should remain dots (Signature lines)
+                lower_para = para.text.lower()
+                if "isteklinin" in lower_para and "ad" in lower_para:
+                    stats["instruction_skipped"] += 1
+                    yellow_runs[0].font.highlight_color = None
+                    for extra_run in yellow_runs[1:]:
+                        extra_run.font.highlight_color = None
+                    i = j
+                    continue
+
+                # Madde 35: Lot Numarası alanını tamamen sil
+                norm_combined = combined_text.lower().strip()
+                if "lot numarası" in norm_combined or "lot numarasi" in norm_combined:
+                    for r_item in yellow_runs:
+                        r_item.text = ""
+                        r_item.font.highlight_color = None
+                    i = j
+                    continue
+
                 # Madde 23: Sözleşme başlığında İhale Türü BÜYÜK ve BOLD olmalı
                 if field_id == "ihale_turu" and "SÖZLEŞMESİ" in para.text:
                     value = str(value).upper()
@@ -420,7 +642,7 @@ def _process_paragraph_runs(para, form_data, stats, context):
                     value = re.sub(r'(?i)\s+projesi$', '', str(value))
                     
                 # Madde 39: Taahhütname cümlesi ihale türüne göre özel cümle ataması
-                if field_id == "ihale_turu" and "hizmetleri sağlamayı" in combined_text:
+                if field_id == "ihale_turu" and ("hizmetleri sağlamayı" in combined_text or "malları tedarik etmeyi" in combined_text):
                     if str(value) == "Mal Alımı": value = "malları tedarik etmeyi"
                     elif str(value) == "Hizmet Alımı": value = "hizmetleri sağlamayı"
                     elif str(value) == "Yapım İşi": value = "yapım işini üstlenmeyi"
@@ -443,45 +665,60 @@ def _process_paragraph_runs(para, form_data, stats, context):
 
                     # --- ETRAFIAKİ < > İŞARETLERİNİ VE EKLERİ TEMİZLE/DÜZELT ---
                     
-                    # Öncesindeki run'ın son karakteri < ise sil
-                    if i > 0 and runs[i-1].text.endswith("<"):
-                        runs[i-1].text = runs[i-1].text[:-1]
-                    if i > 0 and runs[i-1].text.endswith("< "):
-                        runs[i-1].text = runs[i-1].text[:-2]
-                        
+                    # Geriye dönük < sil
                     for prev_idx in range(i-1, -1, -1):
-                        if runs[prev_idx].text.strip() == '<':
-                            runs[prev_idx].text = runs[prev_idx].text.replace('<', '')
+                        txt = runs[prev_idx].text
+                        if '<' in txt:
+                            runs[prev_idx].text = txt.replace('<', '')
                             break
-                        if len(runs[prev_idx].text.strip()) > 0:
+                        if len(txt.strip()) > 0:
                             break
 
-                    # Sonrasındaki run'ın ilk karakteri > ise sil
-                    if j < len(runs) and runs[j].text.startswith(">"):
-                        runs[j].text = runs[j].text[1:]
-                    if j < len(runs) and runs[j].text.startswith(" >"):
-                        runs[j].text = runs[j].text[2:]
-                        
+                    # İleriye dönük > sil ve son ekleri (suffix) akıllıca yakala
                     for next_idx in range(j, len(runs)):
-                        if runs[next_idx].text.strip() == '>':
-                            runs[next_idx].text = runs[next_idx].text.replace('>', '')
-                            break
-                        if len(runs[next_idx].text.strip()) > 0:
-                            txt = runs[next_idx].text
+                        txt = runs[next_idx].text
+                        if not txt: continue
+                        
+                        original_was_just_marker = False
+                        if '>' in txt:
+                            if txt.strip() == '>':
+                                original_was_just_marker = True
+                            txt = txt.replace('>', '')
+                            runs[next_idx].text = txt
                             
-                            if field_id == "is_yeri_il_ilce":
-                                m = re.match(r'^(\'[a-zçğıöşü]+)(.*)', txt, flags=re.IGNORECASE)
-                                if m:
-                                    suffix = get_locative_suffix(formatted_value)
-                                    runs[next_idx].text = suffix + m.group(2)
+                        # Eğer bu run hala metin içeriyorsa veya sadece '>' değil idiyse (yani peşinden bir şey gelebilir)
+                        # Suffix tespiti için sonraki birkaç run'ı birleştirerek kontrol et (bölünmüş run desteği)
+                        if txt.strip() or original_was_just_marker:
+                            combined_suffix = ""
+                            suffix_runs = []
+                            # Sonraki 5 run'ı birleştir (genelde suffix 2-3 run'a yayılır: ' | n | e)
+                            for k in range(next_idx, min(next_idx + 5, len(runs))):
+                                combined_suffix += runs[k].text
+                                suffix_runs.append(runs[k])
+                                if " " in runs[k].text: break # Boşluk gelirse kelime bitmiştir
+                                
+                            # Regex: Tırnak ile başlayan (opsiyonel boşluktan sonra) ve harflerle devam eden yapı
+                            # (not: şablonda hem düz ('), hem kıvrık sağ (’) hem de kıvrık sol (‘) tırnaklar olabiliyor!)
+                            m = re.match(r'^(\s*)([\'’‘][a-zçğıöşü]+)(.*)', combined_suffix, flags=re.IGNORECASE)
+                            if m:
+                                target_suffix = None
+                                if field_id == "is_yeri_il_ilce":
+                                    target_suffix = get_locative_suffix(formatted_value)
+                                elif field_id == "ihale_saati":
+                                    target_suffix = get_dative_suffix(formatted_value)
+                                
+                                if target_suffix:
+                                    quote = m.group(2)[0]
+                                    # Yeni eki oluştur (varsa baştaki boşluğu silerek yapıştırır)
+                                    full_new = quote + target_suffix[1:] + m.group(3)
+                                    suffix_runs[0].text = full_new
+                                    # Diğer birleştirilen run'ları temizle
+                                    for sr in suffix_runs[1:]:
+                                        sr.text = ""
+                                    break # Suffix işlendi
                             
-                            if field_id == "ihale_saati":
-                                m = re.match(r'^(\'[a-zçğıöşü]+)(.*)', txt, flags=re.IGNORECASE)
-                                if m:
-                                    suffix = get_dative_suffix(formatted_value)
-                                    runs[next_idx].text = suffix + m.group(2)
-                                    
-                            break
+                            if txt.strip(): # Eğer suffix değilse ama metin varsa aramayı durdur
+                                break
 
                     stats["filled"] += 1
                 else:
@@ -499,8 +736,22 @@ def _process_paragraph_runs(para, form_data, stats, context):
                         yr.text = ""
                         yr.font.highlight_color = None
                         
-                    if i > 0 and runs[i-1].text.endswith("<"): runs[i-1].text = runs[i-1].text[:-1]
-                    if j < len(runs) and runs[j].text.startswith(">"): runs[j].text = runs[j].text[1:]
+                    # Talimat çevresindeki < ve > işaretlerini temizle
+                    for prev_idx in range(i-1, -1, -1):
+                        txt = runs[prev_idx].text
+                        if '<' in txt:
+                            runs[prev_idx].text = txt.replace('<', '')
+                            break
+                        if len(txt.strip()) > 0:
+                            break
+                            
+                    for next_idx in range(j, len(runs)):
+                        txt = runs[next_idx].text
+                        if '>' in txt:
+                            runs[next_idx].text = txt.replace('>', '')
+                            break
+                        if len(txt.strip()) > 0:
+                            break
                     
                     stats["instruction_skipped"] += 1
                 else:
@@ -605,3 +856,23 @@ def validate_form_data(form_data):
                     )
 
     return len(errors) == 0, errors
+
+
+def _replace_text_across_runs(paragraph, old_text, new_text):
+    """
+    Paragraf içindeki metni (farklı run'lara bölünmüş olsa dahi) bulur ve değiştirir.
+    """
+    if old_text not in paragraph.text:
+        return
+
+    # Önce tekil run'larda dene
+    for run in paragraph.runs:
+        if old_text in run.text:
+            run.text = run.text.replace(old_text, new_text)
+            if old_text not in paragraph.text:
+                return
+
+    # Eğer hala metin varsa ve bu bir "Örnek" metni ise, 
+    # format kaybını göze alarak paragraf düzeyinde siliyoruz.
+    if old_text in paragraph.text and ("Örnek:" in old_text or "ÖRNEK:" in old_text):
+        paragraph.text = paragraph.text.replace(old_text, new_text)
