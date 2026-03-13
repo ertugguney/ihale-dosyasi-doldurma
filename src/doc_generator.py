@@ -196,28 +196,54 @@ def generate_filled_document(template_path, form_data, output_dir="output"):
         # Değerlendirme paragrafı a)/b) kontrolü
         if context.get("in_davet_mektubu"):
             text_norm = para.text.strip().lower()
-            # Başlıktaki talimat metnini temizle
-            if "değerlendirme:" in text_norm and "hangisi uygun ise onu seçiniz" in text_norm:
-                para.text = "DEĞERLENDİRME: "
+            # Başlıktaki talimat metnini temizle (Parantez içi temizliği)
+            # Daha sağlam bir regex ile tespiti yapalım (büyük/küçük harf ve Türkçe karakter toleranslı)
+            if re.search(r'de[ğg]erlendirme.*(uygun|se[çc]iniz|siliniz)', para.text, flags=re.IGNORECASE):
+                # 'DEĞERLENDİRME' kelimesini ve öncesini koru, sonrasını sil
+                header_match = re.search(r'(.*DEĞERLENDİRME)', para.text, flags=re.IGNORECASE)
+                if header_match:
+                    para.text = header_match.group(1).strip() + ": "
+                continue # Bu paragraf için başka işlem yapma
             
             # Seçeneğe göre filtreleme
-            turu = form_data.get("ihale_turu")
-            if text_norm.startswith("a)") and "mal alımı" in text_norm:
+            turu = str(form_data.get("ihale_turu", ""))
+            
+            # İçerik bazlı tespit (markerlar auto-numbering nedeniyle p.text'te olmayabilir)
+            is_a_content = "mal alımı" in text_norm and "en ucuz teklifi veren" in text_norm
+            is_b_content = "hizmet alımlarında" in text_norm and "teknik değerlendirmenin" in text_norm
+            
+            if is_a_content:
                 if turu == "Hizmet Alımı":
                     paragraphs_to_remove.append(para)
                 else:
-                    # a) yazısını kaldır, sadece metni bırak (isteğe bağlı ama "cümle bırakılacaktır" dediği için temizleyelim)
-                    para.text = para.text.replace("a)", "").strip()
-            elif text_norm.startswith("b)") and "hizmet alımlarında" in text_norm:
+                    # a) şıkkını koru, prefix ekle/koru, gereksiz parantezi sil
+                    clean_text = para.text.strip().replace("a)", "").replace(")", "").strip()
+                    para.text = "a) " + clean_text
+                continue # Bu paragraf için başka işlem yapma
+                
+            elif is_b_content:
                 if turu in ["Mal Alımı", "Yapım İşi"]:
                     paragraphs_to_remove.append(para)
                 else:
-                    # b) yazısını kaldır, sadece metni bırak
-                    para.text = para.text.replace("b)", "").strip()
+                    # b) şıkkını koru, prefix ekle/koru, gereksiz parantezi sil
+                    clean_text = para.text.strip().replace("b)", "").replace(")", "").strip()
+                    para.text = "b) " + clean_text
+                continue # Bu paragraf için başka işlem yapma
                     
         # Madde 14: İSTEKLİLERE TALİMATLAR "Aşağıda yer alan maddeler..." silimi
         if "Aşağıda yer alan maddeler içerisindeki boş yerler" in para.text and "Diğer metinleri hiçbir şekilde değiştirmeyiniz" in para.text:
             paragraphs_to_remove.append(para)
+
+        # Sözleşme kodu doldurma (Task 16)
+        if "Sözleşme kodu:" in para.text and "<Ajans ile Yararlanıcı arasında" in para.text:
+            val = str(form_data.get("sozlesme_kodu", ""))
+            if val:
+                para.text = ""
+                para.add_run("Sözleşme kodu: ")
+                r_val = para.add_run(val)
+                r_val.bold = True
+                r_val.italic = False
+                continue # İşlem tamam
 
         # Madde 8: İhalenin yabancı isteklilere açıklığı
         if "İhalenin yabancı isteklilere açıklığı" in para.text or "İhaleye yabancı isteklilere açıklığı" in para.text:
@@ -306,24 +332,25 @@ def generate_filled_document(template_path, form_data, output_dir="output"):
             if usul == "Açık İhale Usulü":
                 paragraphs_to_remove.append(para)
             else: # Pazarlık Usulü
-                # Talimat metnini temizle
-                for old_txt in ["(Sadece Pazarlık Usulü İhalelerde kullanılacaktır.)", "Sadece Pazarlık Usulü İhalelerde kullanılacaktır."]:
-                    if old_txt in para.text:
-                        for r in para.runs:
-                            r.text = r.text.replace(old_txt, "").strip()
+                # Satırı tamamen temizleyip yeniden kurgulayalım
+                para.text = ""
+                para.add_run("a) İhaleye davet mektubu")
             continue
 
         if "Teklif Dosyası" in para.text and "Sözleşme Taslağı" in para.text:
-            if form_data.get("ihale_usulu") == "Açık İhale Usulü":
-                # b) maddesini a) maddesine çevir
-                if "b)" in para.text:
-                    for r in para.runs:
-                        r.text = r.text.replace("b)", "a)")
-                elif para.text.strip().startswith("b"):
-                    # Bazen tırnak/format farklılığı olabilir
-                    for r in para.runs:
-                        if r.text.strip().startswith("b"):
-                            r.text = r.text.replace("b", "a", 1)
+            usul = form_data.get("ihale_usulu")
+            # İçeriği ayıkla (varsa b) veya a) prefixlerini sil)
+            clean_content = para.text.strip()
+            for prefix in ["b)", "a)", "b )", "a )"]:
+                if clean_content.startswith(prefix):
+                    clean_content = clean_content[len(prefix):].strip()
+                    break
+            
+            para.text = ""
+            if usul == "Açık İhale Usulü":
+                para.add_run("a) " + clean_content)
+            else: # Pazarlık Usulü
+                para.add_run("b) " + clean_content)
             continue
 
         # Madde 17 f) bendi: Geçici Teminat Seçimi
@@ -513,10 +540,59 @@ def _process_paragraph_runs(para, form_data, stats, context):
                         if marker in r.text or "_" in r.text:
                             r.text = ""
 
-    # Madde 15: "e) Elektronik posta adresi…" -> ":"
-    if "e) " in para.text and "Elektronik posta adresi" in para.text:
-        for r in runs:
-            r.text = r.text.replace("adresi…", "adresi:").replace("...", ":").replace("…", ":")
+    # Madde 15: "e) Elektronik posta adresi…" -> "e) Elektronik posta adresi: info@kurum.com"
+    if ("e) " in para.text or "e)" in para.text) and "Elektronik posta adresi" in para.text:
+        email_val = str(form_data.get("kurum_eposta", ""))
+        if email_val:
+            # Mevcut metni temizle (prefix hariç veya komple)
+            # Daha güvenli olması için paragrafı yeniden kurgulayalım
+            para.text = ""
+            para.add_run("e) Elektronik posta adresi: ")
+            r_email = para.add_run(email_val)
+            r_email.bold = True
+            r_email.italic = False
+            return # Bu paragraf işlendi
+        else:
+            # Email yoksa sadece noktalamayı düzelt
+            for r in runs:
+                r.text = r.text.replace("adresi…", "adresi:").replace("...", ":").replace("…", ":")
+
+    # Yayın Referansı Alanlarını Doldurma (Merkezi Kontrol: Task 27, 30, 32, 48, 34)
+    # Farklı casing varyasyonları için (Yayın Referansı, YAyın referansı vb.) normalize kontrol
+    para_norm = para.text.lower().replace('ı', 'i').replace('i̇', 'i')
+    has_ref_label = "yayin referans" in para_norm
+    has_placeholder = any(x in para_norm or x in para.text.lower() for x in ["<sözleşme no", "<sozlesme no", "<ihale no"])
+    
+    if has_ref_label and has_placeholder:
+        sz_val = str(form_data.get("sozlesme_kodu", ""))
+        if sz_val:
+            para.text = ""
+            para.add_run("Yayın Referansı: ")
+            r_sz = para.add_run(sz_val)
+            r_sz.bold = True
+            r_sz.italic = False
+            return # İşlem tamam
+
+    # Teklif Sunum Formu - Taahhütname İhale Türü Uyarlaması (Task 31)
+    if "imza atmaya yetkili kişisi olarak" in para.text:
+        i_turu = str(form_data.get("ihale_turu", ""))
+        phrase = ""
+        if "Mal Alımı" in i_turu:
+            phrase = "malları tedarik etmeyi"
+        elif "Hizmet Alımı" in i_turu:
+            phrase = "hizmetleri sağlamayı"
+        elif "Yapım İşi" in i_turu:
+            phrase = "yapım işini üstlenmeyi"
+        
+        if phrase:
+            full_txt = para.text
+            start_mark = "<hizmetleri"
+            if start_mark in full_txt:
+                start_idx = full_txt.find(start_mark)
+                end_idx = full_txt.find(">", start_idx)
+                if start_idx != -1 and end_idx != -1:
+                    actual_placeholder = full_txt[start_idx:end_idx+1]
+                    _replace_text_across_runs(para, actual_placeholder, phrase)
             
     # Madde 34: ">Projesi için" boşluk düzenlemesi
     for r in runs:
@@ -531,10 +607,15 @@ def _process_paragraph_runs(para, form_data, stats, context):
         "< ÖRNEK: TR21-23-İKT-XX/01 >", "<ÖRNEK: TR21-23-İKT-XX/01 >",
         "<uygun olan seçeneği seçiniz >", "<uygun olan seçeneği seçiniz>",
         "uygun olan seçeneği seçiniz",
-        "(Uygun olanı seçiniz)>", "(Uygun olanı seçiniz)", "Uygun olanı seçiniz"
+        "(Uygun olanı seçiniz)>", "(Uygun olanı seçiniz)", "Uygun olanı seçiniz",
+        "(Yararlanıcı ihale konusu"
     ]:
         if old_txt in para.text:
-            _replace_text_across_runs(para, old_txt, "")
+            if old_txt == "(Yararlanıcı ihale konusu":
+                 # Tam parantez içini temizle
+                 para.text = re.sub(r'\(Yararlanıcı ihale konusu.*?\)', '', para.text)
+            else:
+                _replace_text_across_runs(para, old_txt, "")
 
     i = 0
     while i < len(runs):
@@ -733,8 +814,11 @@ def _process_paragraph_runs(para, form_data, stats, context):
 
                 if is_instruction:
                     for yr in yellow_runs:
-                        yr.text = ""
-                        yr.font.highlight_color = None
+                        if yr.text.strip().startswith("___"):
+                            yr.font.highlight_color = None
+                        else:
+                            yr.text = ""
+                            yr.font.highlight_color = None
                         
                     # Talimat çevresindeki < ve > işaretlerini temizle
                     for prev_idx in range(i-1, -1, -1):
@@ -862,17 +946,17 @@ def _replace_text_across_runs(paragraph, old_text, new_text):
     """
     Paragraf içindeki metni (farklı run'lara bölünmüş olsa dahi) bulur ve değiştirir.
     """
-    if old_text not in paragraph.text:
+    if not old_text or old_text not in paragraph.text:
         return
 
-    # Önce tekil run'larda dene
+    # Önce tekil run'larda dene (formatı korumak için)
     for run in paragraph.runs:
         if old_text in run.text:
             run.text = run.text.replace(old_text, new_text)
             if old_text not in paragraph.text:
                 return
 
-    # Eğer hala metin varsa ve bu bir "Örnek" metni ise, 
-    # format kaybını göze alarak paragraf düzeyinde siliyoruz.
-    if old_text in paragraph.text and ("Örnek:" in old_text or "ÖRNEK:" in old_text):
-        paragraph.text = paragraph.text.replace(old_text, new_text)
+    # Eğer hala metin varsa, paragraf düzeyinde değiştir. 
+    # Not: Bu yöntem paragraftaki run-level formatları (bold/italic vb.) 
+    # eğer metin birden fazla run'a yayılmışsa sıfırlayabilir.
+    paragraph.text = paragraph.text.replace(old_text, new_text)

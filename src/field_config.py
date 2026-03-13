@@ -448,7 +448,7 @@ YELLOW_TO_UNIQUE_MAP = {
     "Sözleşme Makamı (Yararlanıcı)nın ismi ve adresi": "kurum_adi",
     "Sözleşme Makamının anteti": "kurum_adi",
     "…………………………………………………………………………": "kurum_adi",
-    "________________": "kurum_adi",
+
     
     "yararlanıcı adresi": "kurum_adresi",
     "..............................................................................................................................": "kurum_adresi",
@@ -598,6 +598,7 @@ INSTRUCTION_FIELDS = [
     "Kesin teminat tutarı sözleşme bedelinin",
     "uygun olan seçeneği seçiniz",
     "Sayın: ________________",
+    "________________",
     "Sözleşme Makamı (Yararlanıcı)nın ismi ve adresi",
 ]
 

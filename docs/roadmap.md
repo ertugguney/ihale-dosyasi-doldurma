@@ -418,7 +418,152 @@
  
 ---
 
-## 🔮 Sonraki Adımlar (Planlanan):
+---
+  
+## ✅ Görev 15: Davet Mektubu "Sayın: ________________" Satırının Korunması (Tamamlandı)
+  
+### Tarih: 11.03.2026
+  
+### Yapılanlar:
+1. **İstisna Güncellemesi**: İhaleye Davet Mektubu sayfasında yer alan "Sayın:" ibaresinin hemen altındaki "________________" (16 alt çizgi) satırı `INSTRUCTION_FIELDS` kapsamına alınarak bu satırın silinmesi önlendi.
+2. **Alt Çizgi Koruması**: `doc_generator.py` içindeki temizleme algoritmasında, `is_instruction` olan ve sadece alt çizgi karakterlerinden (`___`) oluşan satırların metinlerinin silinmemesi, yalnızca sarı vurgularının kaldırılması kuralı eklendi.
+3. **Mükerrer Doldurma Önlemi**: İlgili alan `YELLOW_TO_UNIQUE_MAP` içerisinden çıkarıldı. Böylece bu alana "Sözleşme Makamı (Yararlanıcı) Adı / Ünvanı" bilgisi girilmemesi garanti altına alındı ve form alanı orijinal halinde ("________________") bırakıldı.
+4. **Sistem Doğrulaması**: `ihale_form_verileri_20260225.csv` datasıyla test edildi ve "Sayın:" satırından hemen sonra gelen "________________" satırının hatasız bir biçimde korunduğu, hiçbir veri ile ezilmediği teyit edildi.
+  
+---
+
+---
+ 
+ ## ✅ Görev 41: Davet Mektubu Değerlendirme Bölümü İyileştirmesi (Görev 13) (Tamamlandı)
+ 
+ ### Tarih: 12.03.2026
+ 
+ ### Yapılanlar:
+ 1. **Dinamik Değerlendirme Kriteri Seçimi**: "İHALEYE DAVET MEKTUBU" bölümündeki teknik değerlendirme kriterleri, seçilen `ihale_turu` baz alınarak otomatik olarak filtrelenmektedir.
+    - "Mal Alımı" veya "Yapım İşi" seçildiğinde sadece a) bendi korunur.
+    - "Hizmet Alımı" seçildiğinde sadece b) bendi korunur.
+ 2. **Başlık Temizliği ve Prefix Koruma**: "DEĞERLENDİRME:" başlığı yanındaki parantez içi talimat metinleri ("İhalenize aşağıdaki ifadelerden hangisi uygun ise...") tamamen silinirken, başlığın önündeki madde numaraları (örneğin `(ii)`) muhafaza edilmektedir.
+ 3. **Format ve Madde İşaretleri**: Seçilen seçeneklerin başındaki `a)` veya `b)` işaretleri, şablonda auto-numbering nedeniyle kaybolsa dahi programatik olarak yeniden eklenmekte ve cümle sonundaki gereksiz parantezler temizlenmektedir.
+ 4. **Teknik Uygulama**: `src/doc_generator.py` içinde `context["in_davet_mektubu"]` yardımıyla bağlamsal kontrol ve regex tabanlı (`re.search`) başlık ayrıştırması uygulanmıştır.
+ 5. **Sistem Doğrulaması**: `test_fix_13.py` ile yapılan testlerde, farklı ihale türleri için döküman başlığı ve içeriğinin kusursuz bir şekilde temizlendiği ve doğru criterion'un bırakıldığı teyit edilmiştir.
+ 
+ ---
+ 
+ ## ✅ Görev 42: Madde 15 E-Posta Adresi Otomatik Doldurma (Görev 15) (Tamamlandı)
+ 
+ ### Tarih: 12.03.2026
+ 
+ ### Yapılanlar:
+ 1. **E-posta Entegrasyonu**: "İSTEKLİLERE TALİMATLAR" (Madde 15/e) altındaki e-posta adresi satırı, formdaki `kurum_eposta` verisiyle otomatik doldurulacak şekilde güncellendi.
+ 2. **Tipografi ve Format**: "e) Elektronik posta adresi:" ifadesinden sonra gelen e-posta adresi kalın (**bold**) olarak yazdırılmaktadır.
+ 3. **Noktalama Temizliği**: Önceki sürümlerde oluşan mükerrer iki nokta veya elips işaretleri temizlenerek profesyonel standart (`e) Elektronik posta adresi: email@adres.com`) sağlandı.
+ 4. **Sistem Doğrulaması**: `test_fix_15.py` ile yapılan doğrulamada, verinin doğru yerleştiği ve kalın yazım kuralına uyulduğu teyit edildi.
+ 
+ ---
+ 
+ ## ✅ Görev 43: Madde 14 Sözleşme Kodu Otomatik Doldurma (Görev 16) (Tamamlandı)
+ 
+ ### Tarih: 12.03.2026
+ 
+ ### Yapılanlar:
+ 1. **Sözleşme Kodu Entegrasyonu**: "İSTEKLİLERE TALİMATLAR" başlığı altında yer alan "Sözleşme kodu:" satırı, formdaki `sozlesme_kodu` verisiyle otomatik doldurulacak şekilde programlandı.
+ 2. **Talimat Temizliği**: `<Ajans ile Yararlanıcı arasında imzalanan...>` şeklindeki uzun talimat metni tamamen silinerek döküman profesyonel bir görünüme kavuşturuldu.
+ 3. **Format ve Vurgu**: Girilen sözleşme kodu metni döküman içerisinde kalın (**bold**) olarak yazdırılmaktadır.
+ 4. **Sistem Doğrulaması**: `test_fix_16.py` ile yapılan testlerde, talimatın temizlendiği, kodun doğru yerleştiği ve kalın yazım kuralına uyulduğu teyit edildi.
+ 
+ ---
+ 
+ ## ✅ Görev 44: Madde 17 İhale Dosyası Belgeleri Re-İndeksleme (Görev 17) (Tamamlandı)
+ 
+ ### Tarih: 12.03.2026
+ 
+ ### Yapılanlar:
+ 1. **Dinamik Usul Filtreleme**: "İhaleye davet mektubu" satırı, sadece "Pazarlık Usulü" seçildiğinde dökümanda gösterilir. "Açık İhale Usulü" durumunda bu satır tamamen kaldırılmaktadır.
+ 2. **Akıllı Re-İndeksleme**: 
+    - Açık İhale Usulü seçildiğinde, normalde `b)` olan "Teklif Dosyası" satırı otomatik olarak `a)` indeksine çekilir.
+    - Pazarlık Usulü seçildiğinde, davet mektubu `a)`, teklif dosyası `b)` olarak kalır.
+ 3. **Talimat ve Parantez Temizliği**: Davet mektubu satırındaki parantez içi talimat metni tamamen silinmiş, dökümanda boş parantez (`()`) kalması engellenmiştir.
+ 4. **Format Koruma**: Madde işaretleri (a, b) manuel olarak kontrol edilerek Word'ün otomatik numaralandırma hatalarının önüne geçilmiştir.
+ 5. **Sistem Doğrulaması**: `test_fix_17.py` ile hem Pazarlık hem de Açık İhale senaryoları test edilmiş, indeksleme ve temizlik işlemlerinin kusursuz çalıştığı onaylanmıştır.
+ 
+ ---
+ 
+ ## ✅ Görev 45: Teknik Teklif Formu Yayın Referansı Otomatik Doldurma (Görev 27) (Tamamlandı)
+ 
+ ### Tarih: 12.03.2026
+ 
+ ### Yapılanlar:
+ 1. **Referans Entegrasyonu**: "TEKNİK TEKLİF FORMU" ve ilgili eklerde yer alan "Yayın Referansı:" satırı, formdaki `sozlesme_kodu` verisiyle otomatik doldurulacak şekilde güncellendi.
+ 2. **Kılavuz ve Örnek Temizliği**: `<sözleşme no/ihale no>` şeklindeki placeholderlar ve yanındaki `<Örnek: ...>` metinleri çıktıdan tamamen silinmektedir.
+ 3. **Profesyonel Format**: Yayın referansı olarak basılan sözleşme kodu metni döküman içerisinde kalın (**bold**) olarak biçimlendirilmiştir.
+ 4. **Sistem Doğrulaması**: `test_fix_27.py` ile yapılan doğrulamada, döküman genelindeki (Mal Alımı, Hizmet vb.) tüm yayın referansı alanlarının başarıyla temizlendiği ve doğru verinin kalın bir şekilde yerleştiği teyit edildi.
+ 
+ ---
+ 
+ ## ✅ Görev 46: Mali Teklif Formu Yayın Referansı Otomatik Doldurma (Görev 30) (Tamamlandı)
+ 
+ ### Tarih: 12.03.2026
+ 
+ ### Yapılanlar:
+ 1. **Referans Entegrasyonu (EK:4a)**: "Mali Teklif Formu" (Söz. EK: 4a) bölümündeki "Yayın Referansı:" satırı, form verilerindeki `sozlesme_kodu` ile dinamik olarak dolacak şekilde yapılandırıldı.
+ 2. **Esnek Placeholder Temizliği**: `<sözleşme no/ihale no/lot no>` gibi varyasyon gösteren tüm placeholderlar başarıyla saptanmakta ve temizlenmektedir.
+ 3. **Format Standartlaştırma**: Metin döküman içerisinde kalın (**bold**) olarak yazılmakta ve örnek metinler (`<Örnek: ...>`) ayıklanmaktadır.
+ 4. **Sistem Doğrulaması**: `test_fix_30.py` ile yapılan kontrollerde, Mali Teklif Formu'nun da dahil olduğu tüm yayın referansı alanlarının (toplam 3 adet) kusursuz doldurulduğu teyit edildi.
+ 
+ ---
+ 
+ ## ✅ Görev 47: Mal Alımı Mali Teklif Formu Yayın Referansı Otomatik Doldurma (Görev 32) (Tamamlandı)
+ 
+ ### Tarih: 12.03.2026
+ 
+ ### Yapılanlar:
+ 1. **Bütünsel Yayın Referansı Güncellemesi**: Mal Alımı ve Hizmet Alımı teknik/mali teklif formlarındaki tüm "Yayın Referansı" alanları tek bir akıllı mantık altında toplandı.
+ 2. **Otomatik Doldurma**: Formdaki `sozlesme_kodu` verisi dökümana kalın (**bold**) olarak aktarılmaktadır.
+ 3. **Temizlik**: `<sözleşme no/ihale no>` placeholder'ı ve yanındaki örnek metinler tamamen silinmiştir.
+ 4. **Sistem Doğrulaması**: `test_fix_32.py` ile döküman genelindeki tüm referans alanlarının (3 adet) sorunsuz dolduğu onaylanmıştır.
+ 
+ ---
+ 
+ ## ✅ Görev 48: Teklif Sunum Formu Yayın Referansı Otomatik Doldurma (Tamamlandı)
+ 
+ ### Tarih: 13.03.2026
+ 
+ ### Yapılanlar:
+ 1. **Bölüm D Entegrasyonu**: "Teklif Sunum Formu" (Bölüm D) sayfasındaki "Yayın Referansı:" alanı, form verilerindeki `sozlesme_kodu` ile dinamik olarak dolacak şekilde doğrulandı ve uygulandı.
+ 2. **Placeholder Temizliği**: `<sözleşme no/ihale no>` placeholder'ı ve yanındaki örnek metinler dökümandan tamamen ayıklandı.
+ 3. **Format Standartlaştırma**: Veri döküman içerisinde kalın (**bold**) olarak yazılmakta ve profesyonel görünüm sağlanmaktadır.
+ 4. **Merkezi Mekanizma Doğrulaması**: Task 27, 30 ve 32 ile kurulan merkezi "Yayın Referansı" temizleme mantığının bu sayfada da (P1462) kusursuz çalıştığı testlerle (`check_all_refs.py`) kanıtlandı.
+ 
+ ---
+ 
+ ## ✅ Görev 49: Taahhütname İhale Türü Uyarlaması (Tamamlandı)
+ 
+ ### Tarih: 13.03.2026
+ 
+ ### Yapılanlar:
+ 1. **Metin Uyarlaması**: "Teklif Sunum Formu" içerisindeki Taahhütname bölümünde yer alan `<hizmetleri sağlamayı / malları tedarik etmeyi / yapım işini üstlenmeyi>` placeholder'ı, seçilen "İhale Türü"ne göre otomatik olarak güncellendi.
+ 2. **Dinamik Seçim**: 
+    - Mal Alımı -> "malları tedarik etmeyi"
+    - Hizmet Alımı -> "hizmetleri sağlamayı"
+    - Yapım İşi -> "yapım işini üstlenmeyi"
+ 3. **Talimat Temizliği**: Paragraf sonundaki "(Yararlanıcı ihale konusu... silmelidir.)" şeklindeki talimat metni çıktıdan kaldırıldı.
+ 4. **Gelişmiş Değiştirme**: `_replace_text_across_runs` fonksiyonu, farklı run'lara bölünmüş placeholder'ları destekleyecek şekilde güçlendirildi.
+ 
+ ---
+ 
+ ## ✅ Görev 50: Kilit Uzmanlar Taahhütnamesi Yayın Referansı Otomatik Doldurma (Tamamlandı)
+ 
+ ### Tarih: 13.03.2026
+ 
+ ### Yapılanlar:
+ 1. **Casing Sorunu Çözüldü**: "Hizmet Alımı İhalelerinde Kilit Uzmanlar İçin Münhasırlık ve Müsaitlik Taahhüdü" sayfasındaki "YAyın referansı:" (büyük/küçük harf karışık) varyasyonu başarıyla saptandı.
+ 2. **Dinamik Veri Aktarımı**: Bu alandaki placeholder'lar formdan gelen `sozlesme_kodu` ile otomatik dolduruldu.
+ 3. **Normalize Tespit Mekanizması**: `doc_generator.py` içindeki Yayın Referansı tespit mantığı; Türkçe karakterlere, büyük/küçük harf varyasyonlarına ve farklı yazım şekillerine (ı/i, ö/o vb.) karşı dirençli hale getirildi.
+ 4. **Döküman Genelinde Kontrol**: Toplam 6 farklı Yayın Referansı satırının (Teknik, Mali, Sunum ve Taahhütnameler) tamamının kusursuz dolduğu testlerle (`check_kilit_refs.py`) kanıtlandı.
+ 
+ ---
+ 
+ ## 🔮 Sonraki Adımlar (Planlanan):
 - [ ] Çoklu lot desteği
 - [ ] Tablo alanlarının düzenlenmesi (metraj tablosu vb.)
 - [ ] Şartname ekleme modülü
