@@ -10,12 +10,19 @@ build/
 # Çıktılar (her kullanıcı kendi oluşturur)
 output/
 data/draft.json
+*.csv
 
-# Analiz scriptleri (geliştirme amaçlı)
+# Analiz ve Test scriptleri (geliştirme amaçlı)
 analyze_doc.py
 analyze_detailed.py
 yellow_fields_analysis.json
 table_fields_analysis.json
+test_*.py
+create_report.py
+create_result_csv.py
+dump_article_17.py
+test_encoding.py
+test_gen.py
 
 # Windows kısayolları
 *.lnk

@@ -521,7 +521,7 @@ def _process_paragraph_runs(para, form_data, stats, context):
         # Eğer paragrafta sadece (i) ____________________ vb varsa
         ihale_konusu_val = form_data.get("ihale_konusu", "")
         if isinstance(ihale_konusu_val, list):
-            lines = ihale_konusu_val
+            lines = [v.strip() for v in ihale_konusu_val if v and v.strip()]
         else:
             lines = [line.strip() for line in str(ihale_konusu_val).splitlines() if line.strip()]
         
@@ -665,7 +665,7 @@ def _process_paragraph_runs(para, form_data, stats, context):
                 # İhale Konusu başka bir yerdeyse (tek satırda) virgülle birleştir
                 if field_id == "ihale_konusu":
                     if isinstance(value, list):
-                        value = ", ".join(value)
+                        value = ", ".join([str(v).strip() for v in value if str(v).strip()])
                     elif "\n" in str(value):
                         lines = [line.strip() for line in str(value).splitlines() if line.strip()]
                         value = ", ".join(lines)

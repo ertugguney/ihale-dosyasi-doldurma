@@ -1,0 +1,31 @@
+# AG - İhale Dosyası Doldurma Sistemi
+
+## Proje Özeti
+Trakya Kalkınma Ajansı mali destek yararlanıcılarının ihale dosyalarını 
+Streamlit tabanlı web formu ile doldurmasını sağlayan uygulama.
+
+## Son Durum: ✅ Tamamlandı, Test Edildi ve Canlıya Alındı
+- **Tarih**: 25.02.2026
+- **Canlı URL**: https://ihale-dosyasi-doldurma-bcrhaxb5oh5kglecegvmns.streamlit.app/
+- **GitHub**: https://github.com/ertugguney/ihale-dosyasi-doldurma
+- **Lokal**: localhost:8501
+
+## Erişim
+- **Canlı (herkes)**: https://ihale-dosyasi-doldurma-bcrhaxb5oh5kglecegvmns.streamlit.app/
+- **Lokal**: `cd c:\Users\eguney\Desktop\ihale && streamlit run app.py`
+
+## Yapılan İşler
+1. Word (.doc → .docx) dönüşümü
+2. 140+ sarı vurgulu alan tespiti
+3. 30+ benzersiz form alanı türetme
+4. 7 kategorili Streamlit form uygulaması
+5. Word ve PDF belge oluşturma motoru
+6. UI testi ve doğrulama
+7. Talimat metinlerinin (pazarlık usulü notları vb.) çıktıdan silinmesi
+
+## Dosya Yapısı
+- `app.py` - Ana uygulama
+- `src/field_config.py` - Alan yapılandırması
+- `src/doc_generator.py` - Belge oluşturucu
+- `docs/roadmap.md` - Yol haritası
+- `docs/project_details.md` - Proje detayları

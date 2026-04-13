@@ -12,8 +12,9 @@ cd c:\Users\eguney\Desktop\ihale && streamlit run app.py
 
 ### Gereksinimler:
 ```bash
-pip install streamlit python-docx pywin32
+pip install streamlit python-docx
 ```
+*Not: PDF dönüşümü için Windows'ta MS Word veya tüm sistemlerde LibreOffice yüklü olmalıdır.*
 
 ## 📁 Proje Yapısı
 ```
@@ -48,11 +49,12 @@ ihale/
 - **CSV Kayıt**: Form verileri CSV olarak kaydedilir
 - **Taslak Kayıt/Yükleme**: Yarım kalan formlar kaydedilip yüklenebilir
 
-## 📊 İstatistikler
-| Metrik | Değer |
-|--------|-------|
-| Toplam Sarı Alan | 140+ |
-| Benzersiz Form Alanı | 30+ |
-| Kategori Sayısı | 7 |
-| Zorunlu Alan | 22 |
-| Seçimlik Alan | 10 |
+## ☁️ Streamlit Cloud Yayını
+Bu uygulamayı Streamlit Cloud üzerinde yayınlamak için:
+1. Kodları GitHub deponuza yükleyin.
+2. [share.streamlit.io](https://share.streamlit.io) adresinden GitHub hesabınızla giriş yapın.
+3. "New app" butonuna tıklayıp bu depoyu ve `app.py` dosyasını seçin.
+4. "Advanced settings" kısmında Python sürümünün 3.9+ olduğundan emin olun.
+5. Deploy butonuna basın.
+
+**Not:** Streamlit Cloud üzerinde PDF dönüşümü için `packages.txt` dosyasındaki `libreoffice` paketi otomatik olarak yüklenecektir.

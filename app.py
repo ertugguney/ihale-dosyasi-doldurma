@@ -430,15 +430,15 @@ def render_form_field(field_id, field_info):
         if help_text:
             st.caption(help_text)
             
-        # Mevcut değerleri listeye çevir (CSV'den string gelmiş olabilir)
-        if isinstance(current_value, str):
-            items = [i.strip() for i in current_value.splitlines() if i.strip()]
-        elif isinstance(current_value, list):
+        # Mevcut değerleri listeye çevir
+        if isinstance(current_value, list):
             items = current_value
+        elif isinstance(current_value, str):
+            items = [i.strip() for i in current_value.splitlines() if i.strip()]
         else:
             items = []
             
-        # En az 1 boş satır olsun
+        # En en az 1 satır olsun
         if not items:
             items = [""]
             
@@ -448,16 +448,25 @@ def render_form_field(field_id, field_info):
                 f"Kalem {i+1}",
                 value=item,
                 placeholder=placeholder,
-                key=f"field_{field_id}_{i}"
+                key=f"field_input_{field_id}_{i}"
             )
             new_items.append(input_val)
             
         # Yeni satır ekleme butonu
         if st.button("➕ Yeni Kalem Ekle", key=f"btn_add_{field_id}"):
-            new_items.append("")
-            st.rerun()
+            if len(items) < 10:
+                # Mevcut değerleri koru ve bir boşluk ekle
+                current_typed = []
+                for j in range(len(items)):
+                    val = st.session_state.get(f"field_input_{field_id}_{j}", "")
+                    current_typed.append(val)
+                
+                st.session_state.form_data[field_id] = current_typed + [""]
+                st.rerun()
+            else:
+                st.warning("⚠️ Maksimum 10 kalem eklenebilir!")
             
-        value = [i.strip() for i in new_items if i.strip()]
+        value = new_items
 
     elif field_type in ("phone", "email"):
         value = st.text_input(
@@ -554,6 +563,10 @@ def render_preview():
             st.markdown(f"**{cat}:**")
             for fid, finfo in filled_fields:
                 value = st.session_state.form_data[fid]
+                # İhale Konusu başka bir yerdeyse (tek satırda) virgülle birleştir
+                if fid == "ihale_konusu":
+                    if isinstance(value, list):
+                        value = ", ".join([str(v).strip() for v in value if str(v).strip()])
                 if isinstance(value, date):
                     value = value.strftime("%d/%m/%Y")
                 elif isinstance(value, time):
@@ -662,7 +675,8 @@ def render_generation():
                 st.session_state.generation_result = result
 
                 # CSV kaydet
-                _save_result_csv()
+                csv_path = _save_result_csv()
+                result["csv"] = csv_path
 
             except Exception as e:
                 st.error(f"❌ Belge oluşturma hatası: {str(e)}")
@@ -725,6 +739,21 @@ def render_generation():
             with col_dl2:
                 st.warning(f"PDF oluşturulamadı: {result['pdf_error']}")
 
+        # CSV İndirme Butonu (Task 2)
+        csv_path = result.get("csv")
+        if csv_path and os.path.exists(csv_path):
+            st.markdown("---")
+            col_csv1, col_csv2, col_csv3 = st.columns([1, 2, 1])
+            with col_csv2:
+                with open(csv_path, "rb") as f:
+                    st.download_button(
+                        "📊 Girilen Verileri CSV Olarak İndir",
+                        data=f.read(),
+                        file_name=os.path.basename(csv_path),
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+
 
 def _save_draft():
     """Form verilerini taslak olarak kaydeder."""
@@ -761,7 +790,7 @@ def _load_draft():
 
 
 def _save_result_csv():
-    """Sonuçları CSV olarak kaydeder."""
+    """Sonuçları CSV olarak kaydeder ve dosya yolunu döndürür."""
     output_dir = os.path.join(os.path.dirname(__file__), "output")
     os.makedirs(output_dir, exist_ok=True)
 
@@ -774,7 +803,11 @@ def _save_result_csv():
 
         for fid, finfo in UNIQUE_FIELDS.items():
             value = st.session_state.form_data.get(fid, "")
-            if isinstance(value, date):
+            
+            # Liste tipi alanları işle
+            if isinstance(value, list):
+                value = " | ".join([str(v) for v in value if str(v).strip()])
+            elif isinstance(value, date):
                 value = value.strftime("%d/%m/%Y")
             elif isinstance(value, time):
                 value = value.strftime("%H:%M")
@@ -787,6 +820,8 @@ def _save_result_csv():
                 "Evet" if finfo.get("required") else "Hayır",
                 datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
             ])
+    
+    return csv_path
 
 
 # =============================================================================
