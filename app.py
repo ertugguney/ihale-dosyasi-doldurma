@@ -438,15 +438,19 @@ def render_form_field(field_id, field_info):
         else:
             items = []
             
-        # En en az 1 satır olsun
-        if not items:
-            items = [""]
+        count_key = f"count_{field_id}"
+        if count_key not in st.session_state:
+            st.session_state[count_key] = max(1, len(items))
+            
+        if len(items) > st.session_state[count_key]:
+            st.session_state[count_key] = len(items)
             
         new_items = []
-        for i, item in enumerate(items):
+        for i in range(st.session_state[count_key]):
+            val = items[i] if i < len(items) else ""
             input_val = st.text_input(
                 f"Kalem {i+1}",
-                value=item,
+                value=val,
                 placeholder=placeholder,
                 key=f"field_input_{field_id}_{i}"
             )
@@ -454,14 +458,8 @@ def render_form_field(field_id, field_info):
             
         # Yeni satır ekleme butonu
         if st.button("➕ Yeni Kalem Ekle", key=f"btn_add_{field_id}"):
-            if len(items) < 10:
-                # Mevcut değerleri koru ve bir boşluk ekle
-                current_typed = []
-                for j in range(len(items)):
-                    val = st.session_state.get(f"field_input_{field_id}_{j}", "")
-                    current_typed.append(val)
-                
-                st.session_state.form_data[field_id] = current_typed + [""]
+            if st.session_state[count_key] < 10:
+                st.session_state[count_key] += 1
                 st.rerun()
             else:
                 st.warning("⚠️ Maksimum 10 kalem eklenebilir!")
@@ -672,11 +670,11 @@ def render_generation():
                 elapsed = time_module.time() - start_time
                 result["elapsed_time"] = elapsed
 
-                st.session_state.generation_result = result
-
                 # CSV kaydet
                 csv_path = _save_result_csv()
                 result["csv"] = csv_path
+
+                st.session_state.generation_result = result
 
             except Exception as e:
                 st.error(f"❌ Belge oluşturma hatası: {str(e)}")
