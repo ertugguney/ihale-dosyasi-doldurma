@@ -18,9 +18,11 @@ import sys
 import re
 import subprocess
 import platform
+from copy import deepcopy
 from datetime import datetime, date, time
 from docx import Document
 from docx.enum.text import WD_COLOR_INDEX
+from docx.oxml.ns import qn
 from docx.shared import Pt, RGBColor
 
 # Modül yolunu ayarla (hem local hem cloud ortamında çalışması için)
@@ -165,6 +167,220 @@ def _format_field_value(field_id, value):
     return formatted
 
 
+def _get_run_style_snapshot(run):
+    """Bir run'ın font ve stil bilgisini hafif bir snapshot olarak döndürür."""
+    if run is None:
+        return None
+
+    r_fonts = getattr(getattr(run._element, "rPr", None), "rFonts", None)
+    return {
+        "style": run.style,
+        "font_name": run.font.name,
+        "font_size": run.font.size,
+        "ascii_font": r_fonts.get(qn("w:ascii")) if r_fonts is not None else None,
+        "hansi_font": r_fonts.get(qn("w:hAnsi")) if r_fonts is not None else None,
+        "eastasia_font": r_fonts.get(qn("w:eastAsia")) if r_fonts is not None else None,
+        "cs_font": r_fonts.get(qn("w:cs")) if r_fonts is not None else None,
+    }
+
+
+def _get_reference_style_snapshot(runs, preferred_index=0):
+    """Önce tercih edilen index'in gerisinden, sonra ilerisinden anlamlı run arar."""
+    if not runs:
+        return None
+
+    preferred_index = max(0, min(preferred_index, len(runs) - 1))
+
+    for idx in range(preferred_index, -1, -1):
+        if runs[idx].text and runs[idx].text.strip():
+            return _get_run_style_snapshot(runs[idx])
+
+    for idx in range(preferred_index + 1, len(runs)):
+        if runs[idx].text and runs[idx].text.strip():
+            return _get_run_style_snapshot(runs[idx])
+
+    for run in runs:
+        if run.text:
+            return _get_run_style_snapshot(run)
+
+    return None
+
+
+def _apply_style_snapshot(run, snapshot):
+    """Snapshot'taki yazı tipi ve boyutunu yeni run'a uygular."""
+    if not snapshot:
+        return
+
+    if snapshot.get("style") is not None:
+        run.style = snapshot["style"]
+
+    if snapshot.get("font_name"):
+        run.font.name = snapshot["font_name"]
+        r_pr = run._element.get_or_add_rPr()
+        r_fonts = r_pr.get_or_add_rFonts()
+        for key in ["ascii_font", "hansi_font", "eastasia_font", "cs_font"]:
+            value = snapshot.get(key)
+            if value:
+                attr = {
+                    "ascii_font": qn("w:ascii"),
+                    "hansi_font": qn("w:hAnsi"),
+                    "eastasia_font": qn("w:eastAsia"),
+                    "cs_font": qn("w:cs"),
+                }[key]
+                r_fonts.set(attr, value)
+
+    if snapshot.get("font_size") is not None:
+        run.font.size = snapshot["font_size"]
+
+
+def _add_run_with_style(para, text, snapshot=None, bold=None, italic=None):
+    """Yeni run ekler ve mümkünse referans tipografisini korur."""
+    run = para.add_run(text)
+    _apply_style_snapshot(run, snapshot)
+    if bold is not None:
+        run.bold = bold
+    if italic is not None:
+        run.italic = italic
+    return run
+
+
+def _paragraph_has_numbering(para):
+    """Paragraf Word numbering taşıyorsa True döndürür."""
+    ppr = para._element.pPr
+    return bool(ppr is not None and ppr.numPr is not None)
+
+
+def _strip_leading_bullet_marker(text, marker):
+    """Başta tekrarlayan a)/b) gibi markerları tekilleştirmek için temizler."""
+    if not text:
+        return ""
+    marker = str(marker).strip()
+    if len(marker) >= 2 and marker.endswith(")"):
+        token = re.escape(marker[0]) + r'\s*\)'
+    else:
+        token = re.escape(marker)
+    cleaned = re.sub(r'^\s*(?:' + token + r'\s*)+', '', str(text))
+    return cleaned.strip()
+
+
+def _set_bold_value_paragraph(para, value, prefix="", prefix_snapshot=None, value_snapshot=None):
+    """Paragrafı opsiyonel prefix ve kalın değer ile yeniden yazar."""
+    para.text = ""
+    if prefix:
+        _add_run_with_style(para, prefix, prefix_snapshot)
+
+    lines = [line.strip() for line in str(value).splitlines() if line.strip()]
+    if not lines:
+        lines = [str(value).strip()]
+
+    for idx, line in enumerate(lines):
+        if idx > 0:
+            _add_run_with_style(para, "", value_snapshot).add_break()
+            if prefix:
+                _add_run_with_style(para, prefix, prefix_snapshot)
+        _add_run_with_style(para, line, value_snapshot, bold=True, italic=False)
+
+
+def _rewrite_label_value_paragraph(para, value, label_text=None):
+    """`Label: değer` biçimindeki satırı mevcut tipografiyle yeniden yazar."""
+    existing_runs = list(para.runs)
+    label_snapshot = _get_reference_style_snapshot(existing_runs, 0)
+    value_snapshot = _get_reference_style_snapshot(existing_runs, len(existing_runs) - 1)
+
+    if label_text is None:
+        label_text = para.text.split(":", 1)[0] + ":"
+
+    para.text = ""
+    _add_run_with_style(para, label_text, label_snapshot)
+    separator = "" if label_text.endswith((" ", "\t")) else " "
+    _add_run_with_style(para, separator + str(value).strip(), value_snapshot, bold=True, italic=False)
+
+
+def _clean_sozlesme_makami_adres_placeholder(text):
+    """Şablonda kalan <Sözleşme Makamının Adresine> placeholder'ını temizler."""
+    if not text:
+        return text
+    cleaned = re.sub(r'\s*<\s*Sözleşme Makamının Adresine\s*>\s*', ' ', str(text), flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s{2,}', ' ', cleaned)
+    return cleaned
+
+
+PRESERVE_YELLOW_TEXTS = {
+    "Okudum, kabul ediyorum. .../.../20...",
+    "İmza",
+    "Teklif Veren (Yetkili imzası/imzaları ve kaşe)",
+}
+
+PRESERVE_YELLOW_SUBSTRINGS = {
+    "Tedarikçinin/Hizmet Sunucusunun/Yapım Müteahhidinin Tam Resmi Adı",
+    "Hukuki statüsü / ünvanı",
+    "Resmi tescil numarası",
+    "Açık resmi-tebligat adresi",
+    "Vergi dairesi ve numarası",
+}
+
+
+def _ensure_page_break_before_heading(doc, heading_text):
+    """Belirli bir başlığın her zaman yeni sayfadan başlamasını sağlar."""
+    if not heading_text:
+        return
+
+    normalized_heading = heading_text.strip().lower()
+    for para in doc.paragraphs:
+        if para.text.strip().lower() == normalized_heading:
+            para.paragraph_format.page_break_before = True
+            return
+
+
+def _ensure_page_break_before_paragraph_containing(doc, text_fragment):
+    """İçeriğinde verilen metni barındıran ilk paragrafı yeni sayfadan başlatır."""
+    if not text_fragment:
+        return
+
+    normalized_fragment = text_fragment.strip().lower()
+    for para in doc.paragraphs:
+        if normalized_fragment in para.text.strip().lower():
+            para.paragraph_format.page_break_before = True
+            return
+
+
+def _move_davet_mektubu_section_break_before_teklif_dosyasi(doc):
+    """
+    İhaleye Davet Mektubu section break'ini, 'TEKLİF DOSYASI' başlığından hemen
+    önceki paragrafa taşır. Böylece davet mektubu uzarsa sonraki section header'ı
+    erken başlamaz.
+    """
+    in_davet = False
+    source_para = None
+    target_idx = None
+
+    for idx, para in enumerate(doc.paragraphs):
+        text = para.text.strip()
+        if "İHALEYE DAVET MEKTUBU" in text:
+            in_davet = True
+        if in_davet and para._element.pPr is not None and para._element.pPr.sectPr is not None:
+            source_para = para
+            in_davet = False
+        if text == "TEKLİF DOSYASI" and target_idx is None:
+            target_idx = idx
+
+    if source_para is None or target_idx is None or target_idx <= 0:
+        return
+
+    target_para = doc.paragraphs[target_idx - 1]
+    source_ppr = source_para._element.get_or_add_pPr()
+    source_sect = source_ppr.sectPr
+    if source_sect is None:
+        return
+
+    target_ppr = target_para._element.get_or_add_pPr()
+    if target_ppr.sectPr is not None:
+        target_ppr.remove(target_ppr.sectPr)
+
+    target_ppr.append(deepcopy(source_sect))
+    source_ppr.remove(source_sect)
+
+
 def generate_filled_document(template_path, form_data, output_dir="output"):
     """
     Şablon Word belgesini kullanıcı verileriyle doldurarak yeni belge oluşturur.
@@ -183,7 +399,15 @@ def generate_filled_document(template_path, form_data, output_dir="output"):
     }
 
     # Context bilgileri
-    context = {"in_davet_mektubu": False}
+    context = {
+        "in_davet_mektubu": False,
+        "fill_submission_address_next": False,
+        "fill_submission_contact_next": False,
+        "fill_info_address_next": False,
+        "clear_info_address_extra_next": False,
+        "fill_authority_person_next": False,
+        "authority_signature_snapshot": None,
+    }
 
     # --- PARAGRAFLAR ---
     paragraphs_to_remove = []
@@ -196,13 +420,119 @@ def generate_filled_document(template_path, form_data, output_dir="output"):
         # Değerlendirme paragrafı a)/b) kontrolü
         if context.get("in_davet_mektubu"):
             text_norm = para.text.strip().lower()
+            existing_runs = list(para.runs)
+
+            if context.get("fill_submission_address_next"):
+                kurum_adresi = _format_field_value("kurum_adresi", form_data.get("kurum_adresi", ""))
+                context["fill_submission_address_next"] = False
+                context["fill_submission_contact_next"] = True
+                if kurum_adresi:
+                    ref_snapshot = _get_reference_style_snapshot(existing_runs, 0)
+                    _set_bold_value_paragraph(
+                        para,
+                        kurum_adresi,
+                        prefix="\t",
+                        prefix_snapshot=ref_snapshot,
+                        value_snapshot=ref_snapshot,
+                    )
+                    continue
+
+            if context.get("fill_info_address_next"):
+                kurum_adresi = _format_field_value("kurum_adresi", form_data.get("kurum_adresi", ""))
+                context["fill_info_address_next"] = False
+                context["clear_info_address_extra_next"] = True
+                if kurum_adresi:
+                    ref_snapshot = _get_reference_style_snapshot(existing_runs, 0)
+                    _set_bold_value_paragraph(
+                        para,
+                        kurum_adresi,
+                        prefix="\t",
+                        prefix_snapshot=ref_snapshot,
+                        value_snapshot=ref_snapshot,
+                    )
+                    continue
+
+            if context.get("clear_info_address_extra_next"):
+                normalized = para.text.replace("\t", "").replace("_", "").strip()
+                context["clear_info_address_extra_next"] = False
+                if normalized == "":
+                    para.text = ""
+                    continue
+
+            if context.get("fill_authority_person_next") and para.text.strip() == "":
+                ilgili_personel = _format_field_value("kurum_ilgili_personel", form_data.get("kurum_ilgili_personel", ""))
+                context["fill_authority_person_next"] = False
+                ref_snapshot = context.get("authority_signature_snapshot")
+                context["authority_signature_snapshot"] = None
+                if ilgili_personel:
+                    _set_bold_value_paragraph(
+                        para,
+                        ilgili_personel,
+                        prefix="",
+                        prefix_snapshot=ref_snapshot,
+                        value_snapshot=ref_snapshot,
+                    )
+                context["in_davet_mektubu"] = False
+                context["fill_submission_address_next"] = False
+                context["fill_submission_contact_next"] = False
+                context["fill_info_address_next"] = False
+                context["clear_info_address_extra_next"] = False
+                continue
+
+            if context.get("fill_submission_contact_next") and "Telefon:" in para.text and "Faks:" in para.text:
+                kurum_telefon = _format_field_value("kurum_telefon", form_data.get("kurum_telefon", ""))
+                kurum_faks = _format_field_value("kurum_faks", form_data.get("kurum_faks", ""))
+                phone_label_snapshot = _get_reference_style_snapshot(existing_runs, 0)
+                fax_label_snapshot = _get_reference_style_snapshot(existing_runs, len(existing_runs) - 1)
+                para.text = ""
+                _add_run_with_style(para, "\tTelefon: ", phone_label_snapshot)
+                _add_run_with_style(para, kurum_telefon, phone_label_snapshot, bold=True, italic=False)
+                _add_run_with_style(para, "\t\t\tFaks: ", fax_label_snapshot)
+                _add_run_with_style(para, kurum_faks, fax_label_snapshot, bold=True, italic=False)
+                context["fill_submission_contact_next"] = False
+                continue
+
+            if "İstenen formata uygun hazırlanmış teklifiniz aşağıdaki adrese gönderilmelidir:" in para.text:
+                context["fill_submission_address_next"] = True
+
+            if "Daha fazla bilgi aşağıdaki adresten elde edilebilir:" in para.text:
+                context["fill_info_address_next"] = True
+
+            if "Sözleşme Makamı Yetkilisi" in para.text:
+                kurum_adi = _format_field_value("kurum_adi", form_data.get("kurum_adi", ""))
+                if kurum_adi:
+                    ref_snapshot = _get_reference_style_snapshot(existing_runs, 0)
+                    _set_bold_value_paragraph(
+                        para,
+                        kurum_adi,
+                        prefix="",
+                        prefix_snapshot=ref_snapshot,
+                        value_snapshot=ref_snapshot,
+                    )
+                    context["fill_authority_person_next"] = True
+                    context["authority_signature_snapshot"] = ref_snapshot
+                    continue
+
+            if "Proje Adı" in para.text and ":" in para.text and "_" in para.text:
+                proje_adi = str(form_data.get("proje_adi", "")).strip()
+                if proje_adi:
+                    label_snapshot = _get_reference_style_snapshot(existing_runs, 0)
+                    value_snapshot = _get_reference_style_snapshot(existing_runs, len(existing_runs) - 1)
+                    label = para.text.split(":", 1)[0] + ": "
+                    para.text = ""
+                    _add_run_with_style(para, label, label_snapshot)
+                    _add_run_with_style(para, proje_adi, value_snapshot, bold=True, italic=False)
+                    continue
+
             # Başlıktaki talimat metnini temizle (Parantez içi temizliği)
             # Daha sağlam bir regex ile tespiti yapalım (büyük/küçük harf ve Türkçe karakter toleranslı)
-            if re.search(r'de[ğg]erlendirme.*(uygun|se[çc]iniz|siliniz)', para.text, flags=re.IGNORECASE):
+            if "DEĞERLENDİRME" in para.text and re.search(r'de[ğg]erlendirme.*(uygun|se[çc]iniz|siliniz)', para.text, flags=re.IGNORECASE):
                 # 'DEĞERLENDİRME' kelimesini ve öncesini koru, sonrasını sil
                 header_match = re.search(r'(.*DEĞERLENDİRME)', para.text, flags=re.IGNORECASE)
                 if header_match:
-                    para.text = header_match.group(1).strip() + ": "
+                    header_snapshot = _get_reference_style_snapshot(existing_runs, 0)
+                    para.text = ""
+                    _add_run_with_style(para, header_match.group(1).strip() + ": ", header_snapshot)
                 continue # Bu paragraf için başka işlem yapma
             
             # Seçeneğe göre filtreleme
@@ -217,8 +547,12 @@ def generate_filled_document(template_path, form_data, output_dir="output"):
                     paragraphs_to_remove.append(para)
                 else:
                     # a) şıkkını koru, prefix ekle/koru, gereksiz parantezi sil
-                    clean_text = para.text.strip().replace("a)", "").replace(")", "").strip()
-                    para.text = "a) " + clean_text
+                    line_snapshot = _get_reference_style_snapshot(existing_runs, 0)
+                    clean_text = _strip_leading_bullet_marker(para.text, "a)")
+                    clean_text = clean_text.rstrip(")").strip()
+                    para.text = ""
+                    prefix = "" if _paragraph_has_numbering(para) else "a) "
+                    _add_run_with_style(para, prefix + clean_text, line_snapshot)
                 continue # Bu paragraf için başka işlem yapma
                 
             elif is_b_content:
@@ -226,23 +560,111 @@ def generate_filled_document(template_path, form_data, output_dir="output"):
                     paragraphs_to_remove.append(para)
                 else:
                     # b) şıkkını koru, prefix ekle/koru, gereksiz parantezi sil
-                    clean_text = para.text.strip().replace("b)", "").replace(")", "").strip()
-                    para.text = "b) " + clean_text
+                    line_snapshot = _get_reference_style_snapshot(existing_runs, 0)
+                    clean_text = _strip_leading_bullet_marker(para.text, "b)")
+                    clean_text = clean_text.rstrip(")").strip()
+                    para.text = ""
+                    prefix = "" if _paragraph_has_numbering(para) else "b) "
+                    _add_run_with_style(para, prefix + clean_text, line_snapshot)
                 continue # Bu paragraf için başka işlem yapma
                     
         # Madde 14: İSTEKLİLERE TALİMATLAR "Aşağıda yer alan maddeler..." silimi
         if "Aşağıda yer alan maddeler içerisindeki boş yerler" in para.text and "Diğer metinleri hiçbir şekilde değiştirmeyiniz" in para.text:
             paragraphs_to_remove.append(para)
 
+        # Madde 1: Sözleşme Makamı bilgileri - placeholder uzunluğu çakışmalarını
+        # etiket bazlı doldurma ile önle.
+        if "a)  Adı/Ünvanı" in para.text:
+            val = _format_field_value("kurum_adi", form_data.get("kurum_adi", ""))
+            if val:
+                _rewrite_label_value_paragraph(para, val, "a)  Adı/Ünvanı :")
+                continue
+
+        if "b)  Adresi:" in para.text:
+            val = _format_field_value("kurum_adresi", form_data.get("kurum_adresi", ""))
+            if val:
+                _rewrite_label_value_paragraph(para, val, "b)  Adresi:")
+                continue
+
+        if "c)  Telefon numarası:" in para.text:
+            val = _format_field_value("kurum_telefon", form_data.get("kurum_telefon", ""))
+            if val:
+                _rewrite_label_value_paragraph(para, val, "c)  Telefon numarası:")
+                continue
+
+        if "d)  Faks numarası:" in para.text:
+            val = _format_field_value("kurum_faks", form_data.get("kurum_faks", ""))
+            if val:
+                _rewrite_label_value_paragraph(para, val, "d)  Faks numarası:")
+                continue
+
+        if "f)  İlgili personelinin adı-soyadı/unvanı:" in para.text:
+            val = _format_field_value("kurum_ilgili_personel", form_data.get("kurum_ilgili_personel", ""))
+            if val:
+                _rewrite_label_value_paragraph(para, val, "f)  İlgili personelinin adı-soyadı/unvanı:")
+                continue
+
+        # Madde 2: İhale konusu işe ilişkin bilgiler - placeholder çakışmalarını
+        # etiket bazlı doldurma ile önle.
+        if "Projenin Adı:" in para.text:
+            val = _format_field_value("proje_adi", form_data.get("proje_adi", ""))
+            if val:
+                _rewrite_label_value_paragraph(para, val, "Projenin Adı:")
+                continue
+
+        if "Fiziki Miktarı ve türü:" in para.text:
+            val = _format_field_value("fiziki_miktar_ve_tur", form_data.get("fiziki_miktar_ve_tur", ""))
+            if val:
+                _rewrite_label_value_paragraph(para, val, "Fiziki Miktarı ve türü:")
+                continue
+
+        if "İşin/Teslimin Gerçekleştirileceği yer:" in para.text:
+            val = _format_field_value("teslim_yeri", form_data.get("teslim_yeri", ""))
+            if val:
+                _rewrite_label_value_paragraph(para, val, "İşin/Teslimin Gerçekleştirileceği yer:")
+                continue
+
+        if "Alıma ait (varsa) diğer bilgiler:" in para.text:
+            val = _format_field_value("diger_bilgiler", form_data.get("diger_bilgiler", ""))
+            if val:
+                _rewrite_label_value_paragraph(para, val, "Alıma ait (varsa) diğer bilgiler:")
+                continue
+
+        if "Bu Sözleşmenin Konusu" in para.text and "<Sözleşme Başlığı>" in para.text:
+            existing_runs = list(para.runs)
+            common_snapshot = _get_reference_style_snapshot(existing_runs, 0)
+            yer = _format_field_value("is_yeri_il_ilce", form_data.get("is_yeri_il_ilce", ""))
+            ihale_turu = _format_field_value("ihale_turu", form_data.get("ihale_turu", ""))
+            ihale_konusu_val = form_data.get("ihale_konusu", "")
+            if isinstance(ihale_konusu_val, list):
+                konular = [str(v).strip() for v in ihale_konusu_val if str(v).strip()]
+            else:
+                konular = [line.strip() for line in str(ihale_konusu_val).splitlines() if line.strip()]
+                if len(konular) <= 1 and "," in str(ihale_konusu_val):
+                    konular = [part.strip() for part in str(ihale_konusu_val).split(",") if part.strip()]
+            konu_metni = ", ".join(konular)
+            if ihale_turu == "Yapım İşi":
+                tur_eki = "'dir"
+            else:
+                tur_eki = "'dır"
+            para.text = ""
+            _add_run_with_style(
+                para,
+                f"Bu Sözleşmenin Konusu {yer}‘da uygulanacak {konu_metni} {ihale_turu}{tur_eki}. ",
+                common_snapshot,
+            )
+            continue
+
         # Sözleşme kodu doldurma (Task 16)
         if "Sözleşme kodu:" in para.text and "<Ajans ile Yararlanıcı arasında" in para.text:
             val = str(form_data.get("sozlesme_kodu", ""))
             if val:
+                existing_runs = list(para.runs)
+                label_snapshot = _get_reference_style_snapshot(existing_runs, 0)
+                value_snapshot = _get_reference_style_snapshot(existing_runs, len(existing_runs) - 1)
                 para.text = ""
-                para.add_run("Sözleşme kodu: ")
-                r_val = para.add_run(val)
-                r_val.bold = True
-                r_val.italic = False
+                _add_run_with_style(para, "Sözleşme kodu: ", label_snapshot)
+                _add_run_with_style(para, val, value_snapshot, bold=True, italic=False)
                 continue # İşlem tamam
 
         # Madde 8: İhalenin yabancı isteklilere açıklığı
@@ -254,11 +676,10 @@ def generate_filled_document(template_path, form_data, output_dir="output"):
         if context.get("in_madde_8") and ("yerli yabancı tüm isteklilere açıktır" in para.text or "sadece yerli isteklilere açıktır" in para.text):
             val = form_data.get("istekli_kapsamı")
             if val:
-                para.text = str(val)
-                # Koyu yazım uygulaması yapalım genel kurala uymak için
-                for r in para.runs:
-                    r.font.bold = True
-                    r.font.italic = False
+                existing_runs = list(para.runs)
+                common_snapshot = _get_reference_style_snapshot(existing_runs, 0)
+                para.text = ""
+                _add_run_with_style(para, str(val), common_snapshot, bold=True, italic=False)
             context["in_madde_8"] = False # İşlem tamam
             continue
 
@@ -300,30 +721,32 @@ def generate_filled_document(template_path, form_data, output_dir="output"):
                 if target_1 in para.text:
                     # Para text'ini temizleyip yeni yapıyı kuralım
                     old_text = para.text
+                    existing_runs = list(para.runs)
+                    common_snapshot = _get_reference_style_snapshot(existing_runs, 0)
                     para.text = ""
                     # "Taahhütlü posta / kargo servisi) ile" kısmına kadar olan yeri koru (eğer bir madde numarası varsa vb)
                     prefix = old_text.split(target_1)[0]
-                    para.add_run(prefix + target_1 + " ")
-                    r_val = para.add_run(f"{teslim_yeri}")
-                    r_val.bold = True
-                    para.add_run(" Adresine")
+                    _add_run_with_style(para, prefix + target_1 + " ", common_snapshot)
+                    _add_run_with_style(para, f"{teslim_yeri}", common_snapshot, bold=True, italic=False)
+                    _add_run_with_style(para, " Adresine", common_snapshot)
                     # Geri kalan metni de ekle (eğer varsa)
-                    suffix = old_text.split(target_1)[-1]
+                    suffix = _clean_sozlesme_makami_adres_placeholder(old_text.split(target_1)[-1])
                     if suffix and suffix != old_text:
-                        para.add_run(suffix)
+                        _add_run_with_style(para, suffix, common_snapshot)
                     continue
 
                 if target_2 in para.text:
                     old_text = para.text
+                    existing_runs = list(para.runs)
+                    common_snapshot = _get_reference_style_snapshot(existing_runs, 0)
                     para.text = ""
                     prefix = old_text.split(target_2)[0]
-                    para.add_run(prefix + target_2 + " ")
-                    r_val = para.add_run(f"{teslim_yeri}")
-                    r_val.bold = True
-                    para.add_run(" Adresine")
-                    suffix = old_text.split(target_2)[-1]
+                    _add_run_with_style(para, prefix + target_2 + " ", common_snapshot)
+                    _add_run_with_style(para, f"{teslim_yeri}", common_snapshot, bold=True, italic=False)
+                    _add_run_with_style(para, " Adresine", common_snapshot)
+                    suffix = _clean_sozlesme_makami_adres_placeholder(old_text.split(target_2)[-1])
                     if suffix and suffix != old_text:
-                        para.add_run(suffix)
+                        _add_run_with_style(para, suffix, common_snapshot)
                     continue
 
         # Madde 17: İhale Usulü Kontrolü a) ve b) maddeleri
@@ -333,46 +756,55 @@ def generate_filled_document(template_path, form_data, output_dir="output"):
                 paragraphs_to_remove.append(para)
             else: # Pazarlık Usulü
                 # Satırı tamamen temizleyip yeniden kurgulayalım
+                existing_runs = list(para.runs)
+                common_snapshot = _get_reference_style_snapshot(existing_runs, 0)
+                has_numbering = _paragraph_has_numbering(para)
                 para.text = ""
-                para.add_run("a) İhaleye davet mektubu")
+                prefix = "" if has_numbering else "a) "
+                _add_run_with_style(para, prefix + "İhaleye davet mektubu", common_snapshot)
             continue
 
         if "Teklif Dosyası" in para.text and "Sözleşme Taslağı" in para.text:
             usul = form_data.get("ihale_usulu")
             # İçeriği ayıkla (varsa b) veya a) prefixlerini sil)
             clean_content = para.text.strip()
-            for prefix in ["b)", "a)", "b )", "a )"]:
-                if clean_content.startswith(prefix):
-                    clean_content = clean_content[len(prefix):].strip()
-                    break
+            clean_content = _strip_leading_bullet_marker(clean_content, "a)")
+            clean_content = _strip_leading_bullet_marker(clean_content, "b)")
             
+            existing_runs = list(para.runs)
+            common_snapshot = _get_reference_style_snapshot(existing_runs, 0)
+            has_numbering = _paragraph_has_numbering(para)
             para.text = ""
             if usul == "Açık İhale Usulü":
-                para.add_run("a) " + clean_content)
+                prefix = "" if has_numbering else "a) "
+                _add_run_with_style(para, prefix + clean_content, common_snapshot)
             else: # Pazarlık Usulü
-                para.add_run("b) " + clean_content)
+                prefix = "" if has_numbering else "b) "
+                _add_run_with_style(para, prefix + clean_content, common_snapshot)
             continue
 
         # Madde 17 f) bendi: Geçici Teminat Seçimi
         if "f) İstenmesi halinde Md. 26" in para.text and "geçici teminat" in para.text:
             val = form_data.get("gecici_teminat")
             if val:
+                existing_runs = list(para.runs)
+                label_snapshot = _get_reference_style_snapshot(existing_runs, 0)
+                value_snapshot = _get_reference_style_snapshot(existing_runs, len(existing_runs) - 1)
                 para.text = ""
-                para.add_run("f)\tİstenmesi halinde Md. 26’daki koşullara uygun sunulmuş geçici teminat ")
-                r_val = para.add_run(f"{val}.")
-                r_val.bold = True
-                r_val.italic = False
+                _add_run_with_style(para, "f)\tİstenmesi halinde Md. 26’daki koşullara uygun sunulmuş geçici teminat ", label_snapshot)
+                _add_run_with_style(para, f"{val}.", value_snapshot, bold=True, italic=False)
                 continue
 
         # Madde 17 h) bendi: Kesin Teminat Seçimi
         if "h) İstenmesi halinde Genel Koşullar md. 29" in para.text and "kesin teminat" in para.text:
             val = form_data.get("kesin_teminat")
             if val:
+                existing_runs = list(para.runs)
+                label_snapshot = _get_reference_style_snapshot(existing_runs, 0)
+                value_snapshot = _get_reference_style_snapshot(existing_runs, len(existing_runs) - 1)
                 para.text = ""
-                para.add_run("h)\tİstenmesi halinde Genel Koşullar md. 29’da ve Taslak Sözleşme Özel Koşullar md. 8.1’de şartları tanımlanmış kesin teminat ")
-                r_val = para.add_run(f"{val}.")
-                r_val.bold = True
-                r_val.italic = False
+                _add_run_with_style(para, "h)\tİstenmesi halinde Genel Koşullar md. 29’da ve Taslak Sözleşme Özel Koşullar md. 8.1’de şartları tanımlanmış kesin teminat ", label_snapshot)
+                _add_run_with_style(para, f"{val}.", value_snapshot, bold=True, italic=False)
                 continue
 
         # Madde 25: Sözleşme ve Özel Koşullar - Kesin Teminat Bölümü (Task 25)
@@ -384,36 +816,32 @@ def generate_filled_document(template_path, form_data, output_dir="output"):
                 if "Kesin teminat ve Sigorta" in para.text:
                     prefix = "Kesin teminat ve Sigorta "
                 
+                existing_runs = list(para.runs)
+                common_snapshot = _get_reference_style_snapshot(existing_runs, 0)
                 para.text = ""
-                para.add_run(f"{prefix}Bu sözleşme kapsamında işin ihale edildiği Yüklenici tarafından sözleşme imzalama aşamasında kesin teminat ")
-                r_val = para.add_run(f"{val}")
-                r_val.bold = True
-                r_val.italic = False
-                para.add_run(".")
+                _add_run_with_style(para, f"{prefix}Bu sözleşme kapsamında işin ihale edildiği Yüklenici tarafından sözleşme imzalama aşamasında kesin teminat ", common_snapshot)
+                _add_run_with_style(para, f"{val}", common_snapshot, bold=True, italic=False)
+                _add_run_with_style(para, ".", common_snapshot)
                 continue
                 
         # Madde 24: Ön Ödeme Paragrafı Yeniden Yazımı (Task 24)
         if "Sözleşme kapsamında ön ödeme" in para.text:
             val = form_data.get("on_odeme")
+            existing_runs = list(para.runs)
+            common_snapshot = _get_reference_style_snapshot(existing_runs, 0)
             if val == "Yapılmayacaktır":
                 para.text = ""
-                para.add_run("Sözleşme kapsamında ön ödeme ")
-                r_val = para.add_run("yapılmayacaktır")
-                r_val.bold = True
-                r_val.italic = False
-                para.add_run(".")
+                _add_run_with_style(para, "Sözleşme kapsamında ön ödeme ", common_snapshot)
+                _add_run_with_style(para, "yapılmayacaktır", common_snapshot, bold=True, italic=False)
+                _add_run_with_style(para, ".", common_snapshot)
             elif val == "Yapılacaktır":
                 oran = form_data.get("on_odeme_orani", "")
                 para.text = ""
-                para.add_run("Sözleşme kapsamında ön ödeme ")
-                r_val = para.add_run("yapılacaktır")
-                r_val.bold = True
-                r_val.italic = False
-                para.add_run(". Ön ödeme miktarı sözleşme bedelinin % ")
-                r_oran = para.add_run(f"{oran}")
-                r_oran.bold = True
-                r_oran.italic = False
-                para.add_run("’sı olan ……………….. TL’dir. Ön ödeme, sözleşme imza tarihinden sonra 15 gün içerisinde belirlenen ön ödeme tutarı kadar avans teminat mektubunun sunulmasını takiben yapılacaktır.")
+                _add_run_with_style(para, "Sözleşme kapsamında ön ödeme ", common_snapshot)
+                _add_run_with_style(para, "yapılacaktır", common_snapshot, bold=True, italic=False)
+                _add_run_with_style(para, ". Ön ödeme miktarı sözleşme bedelinin % ", common_snapshot)
+                _add_run_with_style(para, f"{oran}", common_snapshot, bold=True, italic=False)
+                _add_run_with_style(para, "’sı olan ……………….. TL’dir. Ön ödeme, sözleşme imza tarihinden sonra 15 gün içerisinde belirlenen ön ödeme tutarı kadar avans teminat mektubunun sunulmasını takiben yapılacaktır.", common_snapshot)
             continue
                         
         # Madde 25: Kesin Teminat Oranı İkinci Cümle
@@ -424,12 +852,12 @@ def generate_filled_document(template_path, form_data, output_dir="output"):
                 continue
             elif val == "İSTENMEKTEDİR":
                 oran = form_data.get("kesin_teminat_orani", "")
+                existing_runs = list(para.runs)
+                common_snapshot = _get_reference_style_snapshot(existing_runs, 0)
                 para.text = ""
-                para.add_run("Kesin teminat tutarı sözleşme bedelinin % ")
-                r_oran = para.add_run(f"{oran}")
-                r_oran.bold = True
-                r_oran.italic = False
-                para.add_run("’sı kadar olmalıdır.")
+                _add_run_with_style(para, "Kesin teminat tutarı sözleşme bedelinin % ", common_snapshot)
+                _add_run_with_style(para, f"{oran}", common_snapshot, bold=True, italic=False)
+                _add_run_with_style(para, "’sı kadar olmalıdır.", common_snapshot)
                 continue
 
         # Madde 34, 36, 37: İdari Uygunluk / Sözleşme Adı / Teknik Tablo birleşik alan (< Proje adı >Projesi için...)
@@ -449,11 +877,12 @@ def generate_filled_document(template_path, form_data, output_dir="output"):
                 # 'Adı:' kısmında template'te \t\t var
                 label = "Adı:\t\t"
             
+            existing_runs = list(para.runs)
+            label_snapshot = _get_reference_style_snapshot(existing_runs, 0)
+            value_snapshot = _get_reference_style_snapshot(existing_runs, len(existing_runs) - 1)
             para.text = ""
-            para.add_run(label)
-            r_val = para.add_run(f"{p_adi_clean} Projesi için {i_turu}")
-            r_val.bold = True
-            r_val.italic = False
+            _add_run_with_style(para, label, label_snapshot)
+            _add_run_with_style(para, f"{p_adi_clean} Projesi için {i_turu}", value_snapshot, bold=True, italic=False)
             continue
             
         _process_paragraph_runs(para, form_data, stats, context)
@@ -484,6 +913,10 @@ def generate_filled_document(template_path, form_data, output_dir="output"):
             if footer and footer.is_linked_to_previous is False:
                 for para in footer.paragraphs:
                     _process_paragraph_runs(para, form_data, stats, context)
+
+    # Davet mektubu ile sonraki section arasındaki gerçek section break'i,
+    # 'TEKLİF DOSYASI' başlığından hemen önceye taşı.
+    _move_davet_mektubu_section_break_before_teklif_dosyasi(doc)
 
     # Dosya adı oluştur
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -516,6 +949,18 @@ def _process_paragraph_runs(para, form_data, stats, context):
     if not runs:
         return
 
+    para_text_normalized = _normalize_text(para.text)
+    if para_text_normalized in PRESERVE_YELLOW_TEXTS:
+        for r in runs:
+            r.font.highlight_color = None
+        return
+
+    if any(token in para.text for token in PRESERVE_YELLOW_SUBSTRINGS):
+        for r in runs:
+            if r.font.highlight_color == 7:
+                r.font.highlight_color = None
+        return
+
     # Önce "(i)", "(ii)", "(iii)" durumunu kontrol edelim (Davet mektubu mal listesi)
     if context.get("in_davet_mektubu") and any(m in para.text for m in ["(i)", "(ii)", "(iii)"]):
         # Eğer paragrafta sadece (i) ____________________ vb varsa
@@ -544,13 +989,14 @@ def _process_paragraph_runs(para, form_data, stats, context):
     if ("e) " in para.text or "e)" in para.text) and "Elektronik posta adresi" in para.text:
         email_val = str(form_data.get("kurum_eposta", ""))
         if email_val:
+            existing_runs = list(para.runs)
+            label_snapshot = _get_reference_style_snapshot(existing_runs, 0)
+            value_snapshot = _get_reference_style_snapshot(existing_runs, len(existing_runs) - 1)
             # Mevcut metni temizle (prefix hariç veya komple)
             # Daha güvenli olması için paragrafı yeniden kurgulayalım
             para.text = ""
-            para.add_run("e) Elektronik posta adresi: ")
-            r_email = para.add_run(email_val)
-            r_email.bold = True
-            r_email.italic = False
+            _add_run_with_style(para, "e) Elektronik posta adresi: ", label_snapshot)
+            _add_run_with_style(para, email_val, value_snapshot, bold=True, italic=False)
             return # Bu paragraf işlendi
         else:
             # Email yoksa sadece noktalamayı düzelt
@@ -566,11 +1012,12 @@ def _process_paragraph_runs(para, form_data, stats, context):
     if has_ref_label and has_placeholder:
         sz_val = str(form_data.get("sozlesme_kodu", ""))
         if sz_val:
+            existing_runs = list(para.runs)
+            label_snapshot = _get_reference_style_snapshot(existing_runs, 0)
+            value_snapshot = _get_reference_style_snapshot(existing_runs, len(existing_runs) - 1)
             para.text = ""
-            para.add_run("Yayın Referansı: ")
-            r_sz = para.add_run(sz_val)
-            r_sz.bold = True
-            r_sz.italic = False
+            _add_run_with_style(para, "Yayın Referansı: ", label_snapshot)
+            _add_run_with_style(para, sz_val, value_snapshot, bold=True, italic=False)
             return # İşlem tamam
 
     # Teklif Sunum Formu - Taahhütname İhale Türü Uyarlaması (Task 31)
@@ -644,6 +1091,23 @@ def _process_paragraph_runs(para, form_data, stats, context):
             # Eşleştir
             field_id = _match_yellow_to_field(combined_text)
 
+            if (
+                context.get("in_davet_mektubu")
+                and "İhale konusu işin niteliğine göre istenen bilgi" in combined_text
+            ):
+                for r_item in yellow_runs:
+                    r_item.text = ""
+                    r_item.font.highlight_color = None
+                if i - 1 >= 0 and runs[i - 1].text.isspace():
+                    runs[i - 1].text = ""
+                if i - 2 >= 0 and runs[i - 2].text.strip() == ".":
+                    runs[i - 2].text = ""
+                if j < len(runs) and runs[j].text.isspace():
+                    runs[j].text = ""
+                stats["instruction_skipped"] += 1
+                i = j
+                continue
+
             # Özel context geçersiz kılmaları:
             if context.get("in_davet_mektubu") and field_id == "ihale_tarihi":
                 # Davet mektubundaki tarih alanı genellikle …./…./20… formatındadır
@@ -651,6 +1115,21 @@ def _process_paragraph_runs(para, form_data, stats, context):
                     field_id = "davet_tarihi"
 
             if field_id is not None:
+                if "Sözleşme Makamının (Mali Destek Yararlanıcısının) resmi adı ve adresi" in combined_text:
+                    kurum_adi = _format_field_value("kurum_adi", form_data.get("kurum_adi", ""))
+                    kurum_adresi = _format_field_value("kurum_adresi", form_data.get("kurum_adresi", ""))
+                    ref_snapshot = _get_reference_style_snapshot(runs, i)
+                    para.text = ""
+                    if kurum_adi:
+                        _add_run_with_style(para, kurum_adi, ref_snapshot, bold=True, italic=False)
+                    if kurum_adresi:
+                        if kurum_adi:
+                            _add_run_with_style(para, "", ref_snapshot).add_break()
+                        _add_run_with_style(para, kurum_adresi, ref_snapshot, bold=True, italic=False)
+                    stats["filled"] += 1
+                    i = j
+                    continue
+
                 # Madde 34: Birleşik alan kontrolü (< Proje adı >Projesi için <Mal Alımı...>)
                 if "Proje adı" in combined_text and "Projesi için" in combined_text:
                     p_adi = str(form_data.get("proje_adi", ""))
