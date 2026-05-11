@@ -44,3 +44,23 @@ Thumbs.db
 # AG_*.md
 .agent/
 .gemini/
+
+# Yerel dokumanlar ve gelistirme notlari
+AG/
+AGp/
+AG.old
+AG_Ihale_Dosyasi_Doldurma_Sistemi.md
+docs/
+project_details.md
+README.md
+
+# Deploy icin gerekmeyen gelistirme ortamlari
+.devcontainer/
+data/
+
+# Ek yardimci dosyalar
+check_all_refs.py
+check_kilit_refs.py
+scratch_test.py
+Taslak*.doc
+*.log
