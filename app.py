@@ -561,10 +561,8 @@ def render_preview():
             st.markdown(f"**{cat}:**")
             for fid, finfo in filled_fields:
                 value = st.session_state.form_data[fid]
-                # İhale Konusu başka bir yerdeyse (tek satırda) virgülle birleştir
-                if fid == "ihale_konusu":
-                    if isinstance(value, list):
-                        value = ", ".join([str(v).strip() for v in value if str(v).strip()])
+                if isinstance(value, list):
+                    value = ", ".join([str(v).strip() for v in value if str(v).strip()])
                 if isinstance(value, date):
                     value = value.strftime("%d/%m/%Y")
                 elif isinstance(value, time):

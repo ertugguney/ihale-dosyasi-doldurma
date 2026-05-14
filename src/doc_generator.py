@@ -24,6 +24,7 @@ from docx import Document
 from docx.enum.text import WD_COLOR_INDEX
 from docx.oxml.ns import qn
 from docx.shared import Pt, RGBColor
+from docx.text.paragraph import Paragraph
 
 # Modül yolunu ayarla (hem local hem cloud ortamında çalışması için)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -142,6 +143,9 @@ def _format_field_value(field_id, value):
     if value is None or value == "":
         return ""
 
+    if isinstance(value, list):
+        return ", ".join(str(v).strip() for v in value if str(v).strip())
+
     field_info = UNIQUE_FIELDS.get(field_id, {})
     field_type = field_info.get("type", "text")
 
@@ -165,6 +169,35 @@ def _format_field_value(field_id, value):
         formatted = re.sub(r'\s+[pP][rR][oO][gG][rR][aA][mM][ıiIİ]?\s*$', '', formatted)
         
     return formatted
+
+
+def _get_field_items(field_id, form_data):
+    """Form alanını davet mektubu kalemleri için temiz bir listeye dönüştürür."""
+    value = form_data.get(field_id, "")
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+
+    text = str(value).strip()
+    if not text:
+        return []
+
+    if "\n" in text:
+        return [line.strip() for line in text.splitlines() if line.strip()]
+
+    if " | " in text:
+        return [part.strip() for part in text.split(" | ") if part.strip()]
+
+    return [text]
+
+
+def _insert_paragraph_after(paragraph, text, snapshot=None):
+    """Mevcut paragraftan hemen sonra aynı temel formatta yeni paragraf ekler."""
+    new_p = deepcopy(paragraph._p)
+    paragraph._p.addnext(new_p)
+    new_para = Paragraph(new_p, paragraph._parent)
+    new_para.text = ""
+    _add_run_with_style(new_para, text, snapshot)
+    return new_para
 
 
 def _get_run_style_snapshot(run):
@@ -635,14 +668,7 @@ def generate_filled_document(template_path, form_data, output_dir="output"):
             common_snapshot = _get_reference_style_snapshot(existing_runs, 0)
             yer = _format_field_value("is_yeri_il_ilce", form_data.get("is_yeri_il_ilce", ""))
             ihale_turu = _format_field_value("ihale_turu", form_data.get("ihale_turu", ""))
-            ihale_konusu_val = form_data.get("ihale_konusu", "")
-            if isinstance(ihale_konusu_val, list):
-                konular = [str(v).strip() for v in ihale_konusu_val if str(v).strip()]
-            else:
-                konular = [line.strip() for line in str(ihale_konusu_val).splitlines() if line.strip()]
-                if len(konular) <= 1 and "," in str(ihale_konusu_val):
-                    konular = [part.strip() for part in str(ihale_konusu_val).split(",") if part.strip()]
-            konu_metni = ", ".join(konular)
+            konu_metni = _format_field_value("ihale_konusu", form_data.get("ihale_konusu", ""))
             if ihale_turu == "Yapım İşi":
                 tur_eki = "'dir"
             else:
@@ -964,13 +990,10 @@ def _process_paragraph_runs(para, form_data, stats, context):
     # Önce "(i)", "(ii)", "(iii)" durumunu kontrol edelim (Davet mektubu mal listesi)
     if context.get("in_davet_mektubu") and any(m in para.text for m in ["(i)", "(ii)", "(iii)"]):
         # Eğer paragrafta sadece (i) ____________________ vb varsa
-        ihale_konusu_val = form_data.get("ihale_konusu", "")
-        if isinstance(ihale_konusu_val, list):
-            lines = [v.strip() for v in ihale_konusu_val if v and v.strip()]
-        else:
-            lines = [line.strip() for line in str(ihale_konusu_val).splitlines() if line.strip()]
+        lines = _get_field_items("fiziki_miktar_ve_tur", form_data)
+        markers = ["(i)", "(ii)", "(iii)", "(iv)", "(v)", "(vi)", "(vii)", "(viii)", "(ix)", "(x)"]
         
-        for idx, marker in enumerate(["(i)", "(ii)", "(iii)"]):
+        for idx, marker in enumerate(markers[:3]):
             if marker in para.text:
                 if idx < len(lines):
                     # Replace _________ with the line item
@@ -984,6 +1007,13 @@ def _process_paragraph_runs(para, form_data, stats, context):
                     for r in runs:
                         if marker in r.text or "_" in r.text:
                             r.text = ""
+
+        if "(iii)" in para.text and len(lines) > 3 and not context.get("davet_extra_items_inserted"):
+            snapshot = _get_reference_style_snapshot(runs, 0)
+            anchor = para
+            for idx, item in enumerate(lines[3:10], start=3):
+                anchor = _insert_paragraph_after(anchor, f"\t{markers[idx]}\t\t{item}", snapshot)
+            context["davet_extra_items_inserted"] = True
 
     # Madde 15: "e) Elektronik posta adresi…" -> "e) Elektronik posta adresi: info@kurum.com"
     if ("e) " in para.text or "e)" in para.text) and "Elektronik posta adresi" in para.text:
@@ -1141,8 +1171,8 @@ def _process_paragraph_runs(para, form_data, stats, context):
                 
                 # Özel Biçimlendirmeler:
                 
-                # İhale Konusu başka bir yerdeyse (tek satırda) virgülle birleştir
-                if field_id == "ihale_konusu":
+                # Liste alanları tek satır bekleyen şablon alanlarında virgülle birleştir.
+                if field_id in {"ihale_konusu", "fiziki_miktar_ve_tur"}:
                     if isinstance(value, list):
                         value = ", ".join([str(v).strip() for v in value if str(v).strip()])
                     elif "\n" in str(value):
